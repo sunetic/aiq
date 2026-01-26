@@ -5,9 +5,11 @@ AIQ (AI Query): An intelligent SQL client that translates your natural language 
 ## Features
 
 - 🎯 **Natural Language to SQL**: Ask questions in plain English, get precise SQL queries
-- 🔌 **Multiple Database Support**: Currently supports MySQL, with more databases coming soon
+- 📊 **Chart Visualization**: View query results as beautiful charts (bar, line, pie, scatter)
+- 🔌 **Multiple Database Support**: Supports MySQL, PostgreSQL, and SeekDB
 - ⚙️ **Easy Configuration**: Guided setup wizard for LLM and database connections
 - 🎨 **Beautiful CLI**: Interactive menus with smooth transitions and color-coded output
+- 🎨 **Customizable Charts**: Customize chart types, colors, titles, and axis labels
 - 🔒 **Secure**: Local configuration storage, no cloud sync required
 
 ## Installation
@@ -50,9 +52,11 @@ sudo mv aiq /usr/local/bin/
 
 4. **Query Your Database**:
    - Select `sql` from the main menu
+   - Choose a data source
    - Enter your question in natural language
    - Review the generated SQL and confirm execution
-   - View results in a formatted table
+   - Choose to view results as table, chart, or both
+   - Customize chart settings (type, color, title, labels)
 
 ## Usage
 
@@ -71,10 +75,39 @@ sudo mv aiq /usr/local/bin/
 
 ### Data Source Management
 
-- Add new database connections
+- Add new database connections (MySQL, PostgreSQL, SeekDB)
 - List all configured sources
-- Select active source for queries
 - Remove database connections
+
+### Chart Visualization
+
+AIQ supports multiple chart types for visualizing query results:
+
+- **Bar Chart**: For categorical vs numerical data (e.g., sales by region)
+- **Line Chart**: For time series or sequential data (e.g., sales over time)
+- **Pie Chart**: For proportional categorical data (e.g., market share)
+- **Scatter Plot**: For numerical vs numerical data (e.g., correlation analysis)
+
+**Chart Customization**:
+- Select chart type manually or use auto-detection
+- Choose from predefined color palettes
+- Customize chart title and axis labels
+- Automatic detection of suitable chart types based on data structure
+
+**Example Queries for Charts**:
+```sql
+-- Bar chart: Count by category
+SELECT category, COUNT(*) AS count FROM products GROUP BY category;
+
+-- Line chart: Sales over time
+SELECT date, SUM(amount) AS total FROM sales GROUP BY date ORDER BY date;
+
+-- Pie chart: Distribution
+SELECT status, COUNT(*) AS count FROM orders GROUP BY status;
+
+-- Scatter plot: Correlation
+SELECT price, sales FROM products;
+```
 
 ## Configuration
 
@@ -96,7 +129,8 @@ internal/
   sql/            # SQL interactive mode
   llm/            # LLM client integration
   db/             # Database connection and query execution
-  ui/             # UI components (prompts, colors, loading)
+  chart/          # Chart visualization (bar, line, pie, scatter)
+  ui/             # UI components (prompts, colors, loading, charts)
 ```
 
 ### Building

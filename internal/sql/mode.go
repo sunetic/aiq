@@ -226,28 +226,37 @@ func displayChart(result *db.QueryResult) error {
 		}
 	}
 
-	// Get available chart types
-	availableTypes := getAvailableChartTypes(result)
+	// Get available chart types using detector
+	availableTypes := chart.GetAvailableChartTypes(result.Columns, result.Rows)
 	if len(availableTypes) == 0 {
 		return fmt.Errorf("no suitable chart types available for this data")
 	}
 
+	// Convert to menu items for display
+	availableTypesMenu := make([]ui.MenuItem, len(availableTypes))
+	for i, ct := range availableTypes {
+		availableTypesMenu[i] = ui.MenuItem{
+			Label: fmt.Sprintf("%s - %s", ct, getChartTypeLabel(ct)),
+			Value: string(ct),
+		}
+	}
+
 	// Let user select chart type
 	var chartType chart.ChartType
-	if len(availableTypes) == 1 {
+	if len(availableTypesMenu) == 1 {
 		// Only one option, use it
-		chartType = chart.ChartType(availableTypes[0].Value)
-		ui.ShowInfo(fmt.Sprintf("Using chart type: %s", availableTypes[0].Label))
+		chartType = availableTypes[0]
+		ui.ShowInfo(fmt.Sprintf("Using chart type: %s", chartType))
 	} else {
 		// Multiple options, let user choose
-		selected, err := ui.ShowMenu("Select chart type", availableTypes)
+		selected, err := ui.ShowMenu("Select chart type", availableTypesMenu)
 		if err != nil {
 			return fmt.Errorf("chart type selection cancelled")
 		}
 		chartType = chart.ChartType(selected)
 	}
 
-	// Create chart config
+	// Create default config
 	config := chart.DefaultConfig()
 	config.Width = 80
 	config.Height = 20
@@ -259,63 +268,24 @@ func displayChart(result *db.QueryResult) error {
 		return fmt.Errorf("chart rendering failed: %w", err)
 	}
 
-	// Display chart
-	fmt.Println()
-	ui.ShowInfo(fmt.Sprintf("Chart Type: %s", chartType))
-	fmt.Println()
-	fmt.Println(chartOutput)
+	// Display chart using UI helper
+	ui.DisplayChart(chartOutput, string(chartType), config.Title)
 
 	return nil
 }
 
-// getAvailableChartTypes returns available chart types for the given result
-func getAvailableChartTypes(result *db.QueryResult) []ui.MenuItem {
-	var items []ui.MenuItem
-
-	// Check for bar chart (categorical + numerical)
-	hasCategorical := false
-	hasNumerical := false
-	for i := 0; i < len(result.Columns); i++ {
-		colType := chart.DetectColumnType(result.Columns[i], result.Rows, i)
-		if colType == chart.ColumnTypeCategorical {
-			hasCategorical = true
-		}
-		if colType == chart.ColumnTypeNumerical {
-			hasNumerical = true
-		}
+// getChartTypeLabel returns a descriptive label for chart type
+func getChartTypeLabel(ct chart.ChartType) string {
+	switch ct {
+	case chart.ChartTypeBar:
+		return "Bar chart (categorical vs numerical)"
+	case chart.ChartTypeLine:
+		return "Line chart (time series)"
+	case chart.ChartTypePie:
+		return "Pie chart (distribution)"
+	case chart.ChartTypeScatter:
+		return "Scatter plot (numerical vs numerical)"
+	default:
+		return "Unknown chart type"
 	}
-
-	if hasCategorical && hasNumerical {
-		items = append(items, ui.MenuItem{Label: "bar    - Bar chart (categorical vs numerical)", Value: string(chart.ChartTypeBar)})
-		items = append(items, ui.MenuItem{Label: "pie    - Pie chart (distribution)", Value: string(chart.ChartTypePie)})
-	}
-
-	// Check for line chart (temporal/sequential + numerical)
-	hasTemporal := false
-	for i := 0; i < len(result.Columns); i++ {
-		colType := chart.DetectColumnType(result.Columns[i], result.Rows, i)
-		if colType == chart.ColumnTypeTemporal || colType == chart.ColumnTypeSequential {
-			hasTemporal = true
-			break
-		}
-	}
-
-	if hasTemporal && hasNumerical {
-		items = append(items, ui.MenuItem{Label: "line   - Line chart (time series)", Value: string(chart.ChartTypeLine)})
-	}
-
-	// Check for scatter plot (two numerical columns)
-	numColCount := 0
-	for i := 0; i < len(result.Columns); i++ {
-		colType := chart.DetectColumnType(result.Columns[i], result.Rows, i)
-		if colType == chart.ColumnTypeNumerical {
-			numColCount++
-		}
-	}
-
-	if numColCount >= 2 {
-		items = append(items, ui.MenuItem{Label: "scatter - Scatter plot (numerical vs numerical)", Value: string(chart.ChartTypeScatter)})
-	}
-
-	return items
 }

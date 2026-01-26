@@ -277,6 +277,53 @@ func isSequential(prev, curr string) bool {
 }
 
 // countUniqueValues counts unique values in a column
+// GetAvailableChartTypes returns all available chart types for the given data
+func GetAvailableChartTypes(columns []string, rows [][]string) []ChartType {
+	var availableTypes []ChartType
+
+	if len(columns) == 0 || len(rows) == 0 {
+		return availableTypes
+	}
+
+	// Check for categorical and numerical columns
+	hasCategorical := false
+	hasNumerical := false
+	hasTemporal := false
+	numColCount := 0
+
+	for i := 0; i < len(columns); i++ {
+		colType := DetectColumnType(columns[i], rows, i)
+		if colType == ColumnTypeCategorical {
+			hasCategorical = true
+		}
+		if colType == ColumnTypeNumerical {
+			hasNumerical = true
+			numColCount++
+		}
+		if colType == ColumnTypeTemporal || colType == ColumnTypeSequential {
+			hasTemporal = true
+		}
+	}
+
+	// Bar and Pie charts: categorical + numerical
+	if hasCategorical && hasNumerical {
+		availableTypes = append(availableTypes, ChartTypeBar)
+		availableTypes = append(availableTypes, ChartTypePie)
+	}
+
+	// Line chart: temporal/sequential + numerical
+	if hasTemporal && hasNumerical {
+		availableTypes = append(availableTypes, ChartTypeLine)
+	}
+
+	// Scatter plot: two or more numerical columns
+	if numColCount >= 2 {
+		availableTypes = append(availableTypes, ChartTypeScatter)
+	}
+
+	return availableTypes
+}
+
 func countUniqueValues(rows [][]string, colIndex int) int {
 	unique := make(map[string]bool)
 	for _, row := range rows {

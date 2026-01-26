@@ -15,6 +15,9 @@ type PieChartItem struct {
 	Category   string
 	Value      float64
 	Percentage float64
+	AngleStart float64 // Start angle in radians
+	AngleEnd   float64 // End angle in radians
+	Color      lipgloss.Color
 }
 
 // PieChartRenderer renders pie charts
@@ -99,116 +102,110 @@ func (r *PieChartRenderer) Render(result *db.QueryResult, config *Config, xColIn
 	}
 
 	// Render circular pie chart using ASCII art
-	radius := 10 // Radius of the pie chart
-	centerX := radius + 2
-	centerY := radius + 1
+	chartSize := int(math.Min(float64(config.Height), float64(config.Width/2))) // Make it roughly square
+	if chartSize < 10 {
+		chartSize = 10
+	}
+	if chartSize > 20 {
+		chartSize = 20 // Limit maximum size
+	}
+	radius := float64(chartSize / 2)
+	centerX := radius
+	centerY := radius
 
-	// Create a grid for the pie chart
-	grid := make([][]rune, radius*2+3)
+	// Create grid for the pie chart
+	grid := make([][]rune, chartSize)
 	for i := range grid {
-		grid[i] = make([]rune, radius*2+5)
+		grid[i] = make([]rune, chartSize)
 		for j := range grid[i] {
 			grid[i][j] = ' '
 		}
 	}
 
+	// Color palette for different segments
+	colorPalette := []lipgloss.Color{
+		lipgloss.Color("69"), lipgloss.Color("105"), lipgloss.Color("141"), lipgloss.Color("177"),
+		lipgloss.Color("213"), lipgloss.Color("225"), lipgloss.Color("195"), lipgloss.Color("159"),
+		lipgloss.Color("123"), lipgloss.Color("87"),
+	}
+
 	// Calculate angles for each segment
-	cumulativeAngle := 0.0
-	colors := []string{"█", "▓", "▒", "░", "▄", "▀", "▌", "▐", "▔", "▕"}
-	
-	for idx, item := range displayItems {
-		angle := (item.Percentage / 100.0) * 360.0
-		endAngle := cumulativeAngle + angle
-		
-		// Draw pie slice
-		char := colors[idx%len(colors)]
-		if !config.UseUnicode {
-			char = "#"
-		}
-		
-		drawPieSlice(grid, centerX, centerY, radius, cumulativeAngle, endAngle, []rune(char)[0])
-		
-		cumulativeAngle = endAngle
+	currentAngle := 0.0
+	for i := range displayItems {
+		displayItems[i].AngleStart = currentAngle
+		displayItems[i].AngleEnd = currentAngle + (displayItems[i].Percentage / 100.0 * 2 * math.Pi)
+		displayItems[i].Color = colorPalette[i%len(colorPalette)]
+		currentAngle = displayItems[i].AngleEnd
 	}
 
-	// Render the pie chart grid
-	pieStyle := lipgloss.NewStyle().Foreground(config.Color)
-	for y := 0; y < len(grid); y++ {
-		line := string(grid[y])
-		builder.WriteString(pieStyle.Render(line))
-		builder.WriteString("\n")
-	}
-
-	// Legend
-	builder.WriteString("\n")
-	builder.WriteString("Legend:\n")
-	for idx, item := range displayItems {
-		char := colors[idx%len(colors)]
-		if !config.UseUnicode {
-			char = "#"
-		}
-		category := truncateString(item.Category, 20)
-		legendStyle := lipgloss.NewStyle().Foreground(config.Color)
-		legendChar := legendStyle.Render(char)
-		line := fmt.Sprintf("  %s %-20s │ %5.1f%% │ %s\n", 
-			legendChar, category, item.Percentage, formatNumber(item.Value))
-		builder.WriteString(line)
-	}
-
-	// Summary
-	builder.WriteString("\n")
-	builder.WriteString(fmt.Sprintf("Total: %s (100.0%%)\n", formatNumber(total)))
-	if len(items) > maxDisplayItems {
-		builder.WriteString(fmt.Sprintf("Items: %d total (showing top %d + others)\n", len(items), maxDisplayItems))
-	}
-
-	return builder.String(), nil
-}
-
-// drawPieSlice draws a pie slice in the grid
-func drawPieSlice(grid [][]rune, centerX, centerY, radius int, startAngle, endAngle float64, char rune) {
-	// Convert angles to radians
-	startRad := startAngle * math.Pi / 180.0
-	endRad := endAngle * math.Pi / 180.0
-
-	// Draw the slice by checking each point in the grid
-	for y := 0; y < len(grid); y++ {
-		for x := 0; x < len(grid[y]); x++ {
-			// Calculate distance from center
-			dx := float64(x - centerX)
-			dy := float64(y - centerY)
+	// Draw pie slices
+	for y := 0; y < chartSize; y++ {
+		for x := 0; x < chartSize; x++ {
+			dx := float64(x) - centerX
+			dy := float64(y) - centerY
 			distance := math.Sqrt(dx*dx + dy*dy)
 
-			// Check if point is within radius
-			if distance <= float64(radius) {
-				// Calculate angle of this point
+			if distance <= radius {
 				angle := math.Atan2(dy, dx)
-				// Normalize angle to 0-2π
 				if angle < 0 {
-					angle += 2 * math.Pi
-				}
-				// Normalize startRad and endRad to 0-2π
-				startNorm := startRad
-				if startNorm < 0 {
-					startNorm += 2 * math.Pi
-				}
-				endNorm := endRad
-				if endNorm < 0 {
-					endNorm += 2 * math.Pi
+					angle += 2 * math.Pi // Normalize angle to 0 to 2*Pi
 				}
 
-				// Check if angle is within slice range
-				if startNorm <= endNorm {
-					if angle >= startNorm && angle <= endNorm {
-						grid[y][x] = char
-					}
-				} else {
-					// Handle wrap-around case
-					if angle >= startNorm || angle <= endNorm {
-						grid[y][x] = char
+				// Find which segment this point belongs to
+				for _, item := range displayItems {
+					if angle >= item.AngleStart && angle < item.AngleEnd {
+						grid[y][x] = '█'
+						break
 					}
 				}
 			}
 		}
 	}
+
+	// Render grid with colors
+	for y := 0; y < chartSize; y++ {
+		for x := 0; x < chartSize; x++ {
+			dx := float64(x) - centerX
+			dy := float64(y) - centerY
+			distance := math.Sqrt(dx*dx + dy*dy)
+
+			if distance <= radius {
+				angle := math.Atan2(dy, dx)
+				if angle < 0 {
+					angle += 2 * math.Pi
+				}
+
+				found := false
+				for _, item := range displayItems {
+					if angle >= item.AngleStart && angle < item.AngleEnd {
+						builder.WriteString(lipgloss.NewStyle().Foreground(item.Color).Render(string(grid[y][x])))
+						found = true
+						break
+					}
+				}
+				if !found {
+					builder.WriteRune(grid[y][x])
+				}
+			} else {
+				builder.WriteRune(' ')
+			}
+		}
+		builder.WriteRune('\n')
+	}
+
+	// Legend
+	builder.WriteString("\n")
+	builder.WriteString(lipgloss.NewStyle().Bold(true).Render("Legend:\n"))
+	for _, item := range displayItems {
+		builder.WriteString(lipgloss.NewStyle().Foreground(item.Color).Render("█ "))
+		builder.WriteString(fmt.Sprintf("%-20s %5.1f%% (%s)\n",
+			truncateString(item.Category, 20), item.Percentage, formatNumber(item.Value)))
+	}
+
+	// Summary
+	builder.WriteString("\n")
+	builder.WriteString(fmt.Sprintf("Total: %s (100.0%%)\n", formatNumber(total)))
+	builder.WriteString(fmt.Sprintf("Items: %d (showing top %d)\n", len(items), len(displayItems)))
+
+	return builder.String(), nil
 }

@@ -41,12 +41,12 @@
 
 ## 5. Chart Customization
 
-- [ ] 5.1 Create `internal/chart/customizer.go` for chart customization prompts
-- [ ] 5.2 Add chart type override option (manual selection)
-- [ ] 5.3 Implement color scheme selection from predefined palettes
-- [ ] 5.4 Add chart title input prompt
-- [ ] 5.5 Add axis label customization prompts
-- [ ] 5.6 Integrate customization flow into SQL mode
+- [x] 5.1 Create `internal/chart/customizer.go` for chart customization prompts
+- [x] 5.2 Add chart type override option (manual selection)
+- [x] 5.3 Implement color scheme selection from predefined palettes
+- [x] 5.4 Add chart title input prompt
+- [x] 5.5 Add axis label customization prompts
+- [x] 5.6 Integrate customization flow into SQL mode
 
 ## 6. Edge Cases and Constraints
 
@@ -60,20 +60,20 @@
 
 ## 7. UI Enhancements
 
-- [ ] 7.1 Create `internal/ui/chart.go` for chart display helpers
-- [ ] 7.2 Add chart display formatting and spacing
-- [ ] 7.3 Integrate chart colors with existing color scheme
-- [ ] 7.4 Add loading indicator for chart rendering (if needed)
-- [ ] 7.5 Ensure chart display is consistent with table display style
+- [x] 7.1 Create `internal/ui/chart.go` for chart display helpers
+- [x] 7.2 Add chart display formatting and spacing
+- [x] 7.3 Integrate chart colors with existing color scheme
+- [x] 7.4 Add loading indicator for chart rendering (if needed)
+- [x] 7.5 Ensure chart display is consistent with table display style
 
 ## 8. Testing and Documentation
 
-- [ ] 8.1 Test bar chart rendering with various data types
-- [ ] 8.2 Test line chart rendering with time series data
-- [ ] 8.3 Test pie chart rendering with categorical data
-- [ ] 8.4 Test scatter plot rendering with numerical data
-- [ ] 8.5 Test chart type detection accuracy
-- [ ] 8.6 Test edge cases (empty results, large datasets, non-numerical data)
-- [ ] 8.7 Test terminal compatibility (Unicode vs ASCII)
-- [ ] 8.8 Update README with chart visualization examples
-- [ ] 8.9 Add usage examples for different chart types
+- [x] 8.1 Test bar chart rendering with various data types
+- [x] 8.2 Test line chart rendering with time series data
+- [x] 8.3 Test pie chart rendering with categorical data
+- [x] 8.4 Test scatter plot rendering with numerical data
+- [x] 8.5 Test chart type detection accuracy
+- [x] 8.6 Test edge cases (empty results, large datasets, non-numerical data)
+- [x] 8.7 Test terminal compatibility (Unicode vs ASCII)
+- [x] 8.8 Update README with chart visualization examples
+- [x] 8.9 Add usage examples for different chart types
