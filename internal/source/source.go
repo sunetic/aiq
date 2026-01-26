@@ -50,7 +50,7 @@ func (s *Source) GetDatabaseType() string {
 	case DatabaseTypePostgreSQL:
 		return "PostgreSQL"
 	case DatabaseTypeSeekDB:
-		return "SeekDB"
+		return "seekdb"
 	default:
 		return "MySQL"
 	}

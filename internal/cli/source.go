@@ -68,9 +68,9 @@ func addSource() error {
 	fmt.Println()
 	fmt.Println("Select Database Type:")
 	typeItems := []ui.MenuItem{
+		{Label: "seekdb", Value: "seekdb"},
 		{Label: "MySQL", Value: "mysql"},
 		{Label: "PostgreSQL", Value: "postgresql"},
-		{Label: "SeekDB", Value: "seekdb"},
 	}
 	
 	dbType, err := ui.ShowMenu("Database Type", typeItems)

@@ -21,7 +21,7 @@ AIQ (AI Query) is an intelligent SQL client that enables you to interact with da
 
 - 🗣️ **Natural Language to SQL** - Ask questions in plain English or Chinese, get precise SQL queries
 - 📊 **Chart Visualization** - Support for bar charts, line charts, pie charts, and scatter plots
-- 🔌 **Multiple Database Support** - MySQL, PostgreSQL, and SeekDB
+- 🔌 **Multiple Database Support** - [seekdb](https://www.oceanbase.ai/), MySQL, and PostgreSQL
 - 🎨 **Beautiful CLI Interface** - Smooth interactions and color-coded output
 - ⚙️ **Easy Configuration** - Guided setup wizard
 - 🔒 **Local Storage** - Configuration and connection info stored securely locally
@@ -63,7 +63,7 @@ sudo mv aiq /usr/local/bin/
    # Select 'source' from the main menu
    # Choose 'add' to add a new connection
    # Enter database connection details:
-   #   - Database type: MySQL / PostgreSQL / SeekDB
+   #   - Database type: seekdb / MySQL / PostgreSQL
    #   - Host address
    #   - Port
    #   - Database name
@@ -133,9 +133,9 @@ AIQ automatically detects the most suitable chart type based on query result str
 ### 4. Multiple Database Support
 
 Supports various database types:
+- **[seekdb](https://www.oceanbase.ai/)** - The AI-Native Search Database that unifies relational, vector, text, JSON and GIS in a single engine
 - **MySQL** - The most popular relational database
 - **PostgreSQL** - Powerful open-source database
-- **SeekDB** - OceanBase distributed database
 
 ### 5. Interactive Interface
 

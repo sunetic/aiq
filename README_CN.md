@@ -21,7 +21,7 @@ AIQ (AI Query) 是一个智能 SQL 客户端，通过自然语言与数据库交
 
 - 🗣️ **自然语言查询** - 用中文或英文提问，自动生成 SQL
 - 📊 **图表可视化** - 支持柱状图、折线图、饼图、散点图
-- 🔌 **多数据库支持** - MySQL、PostgreSQL、SeekDB
+- 🔌 **多数据库支持** - [seekdb](https://www.oceanbase.ai/)、MySQL、PostgreSQL
 - 🎨 **美观的 CLI 界面** - 流畅的交互体验和彩色输出
 - ⚙️ **简单配置** - 引导式配置向导
 - 🔒 **本地存储** - 配置和连接信息安全存储在本地
@@ -63,7 +63,7 @@ sudo mv aiq /usr/local/bin/
    # 在主菜单中选择 source
    # 选择 add 添加新连接
    # 输入数据库连接信息：
-   #   - 数据库类型：MySQL / PostgreSQL / SeekDB
+   #   - 数据库类型：seekdb / MySQL / PostgreSQL
    #   - 主机地址
    #   - 端口
    #   - 数据库名
@@ -133,9 +133,9 @@ AIQ 会根据查询结果的数据结构自动检测最适合的图表类型：
 ### 4. 多数据库支持
 
 支持多种数据库类型：
+- **[seekdb](https://www.oceanbase.ai/)** - AI 原生搜索数据库，统一关系型、向量、文本、JSON 和 GIS 于单一引擎
 - **MySQL** - 最常用的关系型数据库
 - **PostgreSQL** - 功能强大的开源数据库
-- **SeekDB** - OceanBase 分布式数据库
 
 ### 5. 交互式界面
 
