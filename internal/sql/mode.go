@@ -1,12 +1,13 @@
 package sql
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
+	"github.com/chzyer/readline"
+
+	"github.com/aiq/aiq/internal/chart"
 	"github.com/aiq/aiq/internal/config"
 	"github.com/aiq/aiq/internal/db"
 	"github.com/aiq/aiq/internal/llm"
@@ -71,58 +72,42 @@ func RunSQLMode() error {
 	ui.ShowInfo("Type your question in natural language, or 'exit' to return to main menu.")
 	fmt.Println()
 
-	scanner := bufio.NewScanner(os.Stdin)
+	// Use readline for better Unicode/Chinese character support
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          ui.InfoText("aiq> "),
+		HistoryFile:     "",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize readline: %w", err)
+	}
+	defer rl.Close()
 
 	for {
-		// Show prompt
-		fmt.Print(ui.InfoText("aiq> "))
-
-		// Read multi-line input
-		var lines []string
-		hasInput := false
-		
-		for scanner.Scan() {
-			hasInput = true
-			line := strings.TrimSpace(scanner.Text())
-			
-			// Handle empty lines in multi-line input
-			if line == "" && len(lines) == 0 {
-				// Empty first line - show prompt again
-				fmt.Print(ui.InfoText("aiq> "))
+		// Read input line (readline handles Unicode properly)
+		line, err := rl.Readline()
+		if err != nil {
+			if err == readline.ErrInterrupt {
+				// Ctrl+C - continue to next prompt
+				fmt.Println()
 				continue
 			}
-			
-			// Add non-empty lines
-			if line != "" {
-				lines = append(lines, line)
-			}
-			
-			// Check if line ends with semicolon or is a command
-			if line != "" && (strings.HasSuffix(line, ";") || strings.ToLower(line) == "exit" || strings.ToLower(line) == "back") {
-				break
-			}
-		}
-
-		// Check for scanner errors
-		if err := scanner.Err(); err != nil {
-			return fmt.Errorf("error reading input: %w", err)
-		}
-
-		// Handle EOF (Ctrl+D) - if no input was received, exit SQL mode
-		if !hasInput && len(lines) == 0 {
+			// EOF (Ctrl+D) - exit SQL mode
 			fmt.Println()
 			ui.ShowInfo("Exiting SQL mode (EOF).")
 			return nil
 		}
 
-		// If we have some input but scanner stopped (EOF), process what we have
-		if len(lines) == 0 {
-			fmt.Println()
+		line = strings.TrimSpace(line)
+
+		// Handle empty input
+		if line == "" {
 			continue
 		}
 
-		query := strings.Join(lines, " ")
-		query = strings.TrimSpace(query)
+		// Use the line directly as query (readline handles multi-byte characters correctly)
+		query := line
 
 		// Handle exit command
 		if strings.ToLower(query) == "exit" || strings.ToLower(query) == "back" {
@@ -176,11 +161,161 @@ func RunSQLMode() error {
 		fmt.Println()
 		if len(result.Rows) == 0 {
 			ui.ShowInfo("Query executed successfully. No rows returned.")
-		} else {
-			ui.ShowSuccess(fmt.Sprintf("Query executed successfully. %d row(s) returned.", len(result.Rows)))
 			fmt.Println()
-			ui.PrintTable(result.Columns, result.Rows)
+			continue
 		}
+
+		ui.ShowSuccess(fmt.Sprintf("Query executed successfully. %d row(s) returned.", len(result.Rows)))
 		fmt.Println()
+
+		// Prompt for view type
+		viewItems := []ui.MenuItem{
+			{Label: "table - View as table", Value: "table"},
+			{Label: "chart - View as chart", Value: "chart"},
+			{Label: "both  - View both table and chart", Value: "both"},
+		}
+
+		viewChoice, err := ui.ShowMenu("Select view type", viewItems)
+		if err != nil {
+			fmt.Println()
+			continue
+		}
+
+		// Display table if requested
+		if viewChoice == "table" || viewChoice == "both" {
+			ui.PrintTable(result.Columns, result.Rows)
+			fmt.Println()
+		}
+
+		// Display chart if requested
+		if viewChoice == "chart" || viewChoice == "both" {
+			if err := displayChart(result); err != nil {
+				ui.ShowWarning(fmt.Sprintf("Failed to render chart: %v", err))
+				ui.ShowInfo("Displaying table view instead.")
+				ui.PrintTable(result.Columns, result.Rows)
+			}
+			fmt.Println()
+		}
 	}
+}
+
+// displayChart displays query results as a chart
+func displayChart(result *db.QueryResult) error {
+	// Check for single column result
+	if len(result.Columns) == 1 {
+		return fmt.Errorf("single column results cannot be visualized as charts")
+	}
+
+	// Detect chart type
+	detection, err := chart.DetectChartTypeWithColumns(result.Columns, result.Rows)
+	if err != nil {
+		return fmt.Errorf("chart detection failed: %w", err)
+	}
+
+	// Check if chartable
+	if detection.Type == chart.ChartTypeTable {
+		return fmt.Errorf("data structure not suitable for chart visualization (no numerical data detected)")
+	}
+
+	// Check dataset size
+	if len(result.Rows) > 1000 {
+		ui.ShowWarning(fmt.Sprintf("Large dataset (%d rows). Chart may be slow to render.", len(result.Rows)))
+		proceed, _ := ui.ShowConfirm("Continue with chart rendering?")
+		if !proceed {
+			return fmt.Errorf("chart rendering cancelled")
+		}
+	}
+
+	// Get available chart types
+	availableTypes := getAvailableChartTypes(result)
+	if len(availableTypes) == 0 {
+		return fmt.Errorf("no suitable chart types available for this data")
+	}
+
+	// Let user select chart type
+	var chartType chart.ChartType
+	if len(availableTypes) == 1 {
+		// Only one option, use it
+		chartType = chart.ChartType(availableTypes[0].Value)
+		ui.ShowInfo(fmt.Sprintf("Using chart type: %s", availableTypes[0].Label))
+	} else {
+		// Multiple options, let user choose
+		selected, err := ui.ShowMenu("Select chart type", availableTypes)
+		if err != nil {
+			return fmt.Errorf("chart type selection cancelled")
+		}
+		chartType = chart.ChartType(selected)
+	}
+
+	// Create chart config
+	config := chart.DefaultConfig()
+	config.Width = 80
+	config.Height = 20
+	config.Title = fmt.Sprintf("Query Results (%d rows)", len(result.Rows))
+
+	// Render chart
+	chartOutput, err := chart.RenderChart(result, chartType, config)
+	if err != nil {
+		return fmt.Errorf("chart rendering failed: %w", err)
+	}
+
+	// Display chart
+	fmt.Println()
+	ui.ShowInfo(fmt.Sprintf("Chart Type: %s", chartType))
+	fmt.Println()
+	fmt.Println(chartOutput)
+
+	return nil
+}
+
+// getAvailableChartTypes returns available chart types for the given result
+func getAvailableChartTypes(result *db.QueryResult) []ui.MenuItem {
+	var items []ui.MenuItem
+
+	// Check for bar chart (categorical + numerical)
+	hasCategorical := false
+	hasNumerical := false
+	for i := 0; i < len(result.Columns); i++ {
+		colType := chart.DetectColumnType(result.Columns[i], result.Rows, i)
+		if colType == chart.ColumnTypeCategorical {
+			hasCategorical = true
+		}
+		if colType == chart.ColumnTypeNumerical {
+			hasNumerical = true
+		}
+	}
+
+	if hasCategorical && hasNumerical {
+		items = append(items, ui.MenuItem{Label: "bar    - Bar chart (categorical vs numerical)", Value: string(chart.ChartTypeBar)})
+		items = append(items, ui.MenuItem{Label: "pie    - Pie chart (distribution)", Value: string(chart.ChartTypePie)})
+	}
+
+	// Check for line chart (temporal/sequential + numerical)
+	hasTemporal := false
+	for i := 0; i < len(result.Columns); i++ {
+		colType := chart.DetectColumnType(result.Columns[i], result.Rows, i)
+		if colType == chart.ColumnTypeTemporal || colType == chart.ColumnTypeSequential {
+			hasTemporal = true
+			break
+		}
+	}
+
+	if hasTemporal && hasNumerical {
+		items = append(items, ui.MenuItem{Label: "line   - Line chart (time series)", Value: string(chart.ChartTypeLine)})
+	}
+
+	// Check for scatter plot (two numerical columns)
+	numColCount := 0
+	for i := 0; i < len(result.Columns); i++ {
+		colType := chart.DetectColumnType(result.Columns[i], result.Rows, i)
+		if colType == chart.ColumnTypeNumerical {
+			numColCount++
+		}
+	}
+
+	if numColCount >= 2 {
+		items = append(items, ui.MenuItem{Label: "scatter - Scatter plot (numerical vs numerical)", Value: string(chart.ChartTypeScatter)})
+	}
+
+	return items
 }

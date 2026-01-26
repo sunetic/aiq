@@ -140,6 +140,9 @@ func (c *Client) TranslateToSQL(ctx context.Context, naturalLanguage string, sch
 		return "", fmt.Errorf("empty SQL in response")
 	}
 
+	// Clean SQL: remove markdown code block markers if present
+	sql = cleanSQL(sql)
+
 	return sql, nil
 }
 
@@ -163,6 +166,22 @@ func (c *Client) buildAPIURL() string {
 	
 	// Otherwise, append /v1/chat/completions
 	return baseURL + "/v1/chat/completions"
+}
+
+// cleanSQL removes markdown code block markers and extra whitespace from SQL
+func cleanSQL(sql string) string {
+	sql = strings.TrimSpace(sql)
+	
+	// Remove markdown code block markers (```sql, ```, etc.)
+	sql = strings.TrimPrefix(sql, "```sql")
+	sql = strings.TrimPrefix(sql, "```SQL")
+	sql = strings.TrimPrefix(sql, "```")
+	sql = strings.TrimSuffix(sql, "```")
+	
+	// Remove any leading/trailing whitespace again
+	sql = strings.TrimSpace(sql)
+	
+	return sql
 }
 
 func buildSQLPrompt(naturalLanguage string, schemaContext string, databaseType string) string {
