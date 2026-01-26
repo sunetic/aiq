@@ -1,8 +1,8 @@
-# AIQ
-
 <div align="center">
 
-**AIQ** - 一个将自然语言转换为 SQL 查询的智能 SQL 客户端
+# AIQ
+
+**一个将自然语言转换为 SQL 查询的智能 SQL 客户端**
 
 [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square)](LICENSE)

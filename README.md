@@ -1,8 +1,8 @@
-# AIQ
-
 <div align="center">
 
-**AIQ** - An intelligent SQL client that translates natural language into SQL queries
+# AIQ
+
+**An intelligent SQL client that translates natural language into SQL queries**
 
 [![Go Version](https://img.shields.io/badge/go-1.21+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square)](LICENSE)
