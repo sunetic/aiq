@@ -39,64 +39,95 @@ func RunSQLMode(sessionFile string) error {
 		}
 	}
 
-	// Select source (if not restored from session)
+	// Select source (if not restored from session) - now optional for free mode
 	if sess == nil || sourceName == "" {
 		sources, err := source.LoadSources()
 		if err != nil {
 			return fmt.Errorf("failed to load sources: %w", err)
 		}
 
+		// If no sources configured, enter free mode automatically
 		if len(sources) == 0 {
-			return fmt.Errorf("no data sources configured. Please add a source first")
-		}
-
-		items := make([]ui.MenuItem, 0, len(sources))
-		for _, s := range sources {
-			label := fmt.Sprintf("%s (%s/%s:%d/%s)", s.Name, s.Type, s.Host, s.Port, s.Database)
-			items = append(items, ui.MenuItem{Label: label, Value: s.Name})
-		}
-
-		sourceName, err = ui.ShowMenu("Select Data Source", items)
-		if err != nil {
-			return err
-		}
-	}
-
-	// Load source
-	var err error
-	src, err = source.GetSource(sourceName)
-	if err != nil {
-		// If source from session doesn't exist, prompt for new one
-		if sess != nil {
-			ui.ShowWarning(fmt.Sprintf("Data source '%s' from session no longer exists.", sourceName))
-			sources, loadErr := source.LoadSources()
-			if loadErr != nil {
-				return fmt.Errorf("failed to load sources: %w", loadErr)
-			}
-			if len(sources) == 0 {
-				return fmt.Errorf("no data sources configured. Please add a source first")
-			}
-			items := make([]ui.MenuItem, 0, len(sources))
+			ui.ShowInfo("No data sources configured. Entering free mode (general conversation and Skills only, no SQL).")
+			src = nil
+			sourceName = ""
+		} else {
+			// Build menu items with sources and skip option
+			items := make([]ui.MenuItem, 0, len(sources)+1)
 			for _, s := range sources {
 				label := fmt.Sprintf("%s (%s/%s:%d/%s)", s.Name, s.Type, s.Host, s.Port, s.Database)
 				items = append(items, ui.MenuItem{Label: label, Value: s.Name})
 			}
+			items = append(items, ui.MenuItem{Label: "Skip (free mode) - General conversation and Skills only", Value: "__free_mode__"})
+
 			sourceName, err = ui.ShowMenu("Select Data Source", items)
 			if err != nil {
 				return err
 			}
-			src, err = source.GetSource(sourceName)
-			if err != nil {
+
+			// Check if user chose free mode
+			if sourceName == "__free_mode__" {
+				src = nil
+				sourceName = ""
+			} else {
+				// Load selected source
+				src, err = source.GetSource(sourceName)
+				if err != nil {
+					return fmt.Errorf("failed to load source: %w", err)
+				}
+			}
+		}
+	} else {
+		// Load source from session
+		var err error
+		src, err = source.GetSource(sourceName)
+		if err != nil {
+			// If source from session doesn't exist, prompt for new one or free mode
+			if sess != nil {
+				ui.ShowWarning(fmt.Sprintf("Data source '%s' from session no longer exists.", sourceName))
+				sources, loadErr := source.LoadSources()
+				if loadErr != nil {
+					return fmt.Errorf("failed to load sources: %w", loadErr)
+				}
+				if len(sources) == 0 {
+					ui.ShowInfo("No data sources available. Entering free mode.")
+					src = nil
+					sourceName = ""
+				} else {
+					items := make([]ui.MenuItem, 0, len(sources)+1)
+					for _, s := range sources {
+						label := fmt.Sprintf("%s (%s/%s:%d/%s)", s.Name, s.Type, s.Host, s.Port, s.Database)
+						items = append(items, ui.MenuItem{Label: label, Value: s.Name})
+					}
+					items = append(items, ui.MenuItem{Label: "Skip (free mode) - General conversation and Skills only", Value: "__free_mode__"})
+					sourceName, err = ui.ShowMenu("Select Data Source", items)
+					if err != nil {
+						return err
+					}
+					if sourceName == "__free_mode__" {
+						src = nil
+						sourceName = ""
+					} else {
+						src, err = source.GetSource(sourceName)
+						if err != nil {
+							return fmt.Errorf("failed to load source: %w", err)
+						}
+					}
+				}
+			} else {
 				return fmt.Errorf("failed to load source: %w", err)
 			}
-		} else {
-			return fmt.Errorf("failed to load source: %w", err)
 		}
 	}
 
 	// Create new session if not restored
 	if sess == nil {
-		sess = session.NewSession(sourceName, string(src.Type))
+		if src != nil {
+			sess = session.NewSession(sourceName, string(src.Type))
+		} else {
+			// Free mode session (no source)
+			sess = session.NewSession("", "")
+		}
 	}
 
 	// Load config
@@ -105,12 +136,25 @@ func RunSQLMode(sessionFile string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Create database connection
-	conn, err := db.NewConnection(src.DSN(), string(src.Type))
-	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+	// Create database connection only if source exists
+	var conn *db.Connection
+	var schema *db.Schema
+	ctx := context.Background() // Create context for use throughout the function
+	if src != nil {
+		var err error
+		conn, err = db.NewConnection(src.DSN(), string(src.Type))
+		if err != nil {
+			return fmt.Errorf("failed to connect to database: %w", err)
+		}
+		defer conn.Close()
+
+		// Fetch schema for context
+		schema, err = conn.GetSchema(ctx, src.Database)
+		if err != nil {
+			ui.ShowWarning(fmt.Sprintf("Failed to fetch schema: %v. Continuing without schema context.", err))
+			schema = &db.Schema{}
+		}
 	}
-	defer conn.Close()
 
 	// Initialize Skills manager
 	skillsManager := skills.NewManager()
@@ -130,15 +174,12 @@ func RunSQLMode(sessionFile string) error {
 	// Create LLM client
 	llmClient := llm.NewClient(cfg.LLM.URL, cfg.LLM.APIKey, cfg.LLM.Model)
 
-	// Fetch schema for context
-	ctx := context.Background()
-	schema, err := conn.GetSchema(ctx, src.Database)
-	if err != nil {
-		ui.ShowWarning(fmt.Sprintf("Failed to fetch schema: %v. Continuing without schema context.", err))
-		schema = &db.Schema{}
+	// Show mode info
+	if src != nil {
+		ui.ShowInfo(fmt.Sprintf("Entering chat mode. Source: %s (%s/%s:%d/%s)", src.Name, src.Type, src.Host, src.Port, src.Database))
+	} else {
+		ui.ShowInfo("Entering free mode (general conversation and Skills only, no SQL execution)")
 	}
-
-	ui.ShowInfo(fmt.Sprintf("Entering chat mode. Source: %s (%s/%s:%d/%s)", src.Name, src.Type, src.Host, src.Port, src.Database))
 	if len(sess.Messages) > 0 {
 		ui.ShowInfo(fmt.Sprintf("Conversation history: %d messages", len(sess.Messages)))
 	}
@@ -160,9 +201,21 @@ func RunSQLMode(sessionFile string) error {
 	// Store last generated SQL for execute command
 	var lastGeneratedSQL string
 
+	// Build dynamic prompt based on source availability
+	var buildPrompt func() string
+	if src != nil {
+		buildPrompt = func() string {
+			return ui.InfoText(fmt.Sprintf("aiq[%s]> ", src.Name))
+		}
+	} else {
+		buildPrompt = func() string {
+			return ui.InfoText("aiq> ")
+		}
+	}
+
 	// Use readline for better Unicode/Chinese character support
 	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          ui.InfoText("aiq> "),
+		Prompt:          buildPrompt(),
 		HistoryFile:     "",
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
@@ -171,6 +224,10 @@ func RunSQLMode(sessionFile string) error {
 		return fmt.Errorf("failed to initialize readline: %w", err)
 	}
 	defer rl.Close()
+
+	// Update prompt dynamically (readline doesn't support dynamic prompts directly,
+	// but we can recreate it if source changes in future)
+	// For now, prompt is set once at initialization
 
 	for {
 		// Read input line (readline handles Unicode properly)
@@ -366,23 +423,32 @@ func RunSQLMode(sessionFile string) error {
 			})
 		}
 
-		// Prepare schema context
-		schemaContext := schema.FormatSchema()
-		if schemaContext == "" {
-			schemaContext = fmt.Sprintf("Currently connected to database: %s\nNo schema information available yet.", src.Database)
+		// Prepare schema context (empty for free mode)
+		var schemaContext string
+		var databaseType string
+		if src != nil && schema != nil {
+			schemaContext = schema.FormatSchema()
+			if schemaContext == "" {
+				schemaContext = fmt.Sprintf("Currently connected to database: %s\nNo schema information available yet.", src.Database)
+			} else {
+				schemaContext = fmt.Sprintf("Currently connected to database: %s\n\n%s", src.Database, schemaContext)
+			}
+			databaseType = src.GetDatabaseType()
 		} else {
-			schemaContext = fmt.Sprintf("Currently connected to database: %s\n\n%s", src.Database, schemaContext)
+			// Free mode: no schema context
+			schemaContext = ""
+			databaseType = ""
 		}
 
 		// Get tool definitions (including built-in tools)
 		tools := tool.GetLLMFunctionsWithBuiltin(conn)
 
 		// Create tool handler
-		toolHandler := NewToolHandler(conn, skillsManager)
+		toolHandler := NewToolHandler(conn, skillsManager, llmClient)
 
 		// Use tool calling loop - LLM decides which tools to call
 		// Note: "Thinking..." and "Waiting..." messages are handled inside HandleToolCallLoop
-		finalResponse, queryResult, err := toolHandler.HandleToolCallLoop(ctx, llmClient, query, schemaContext, src.GetDatabaseType(), conversationHistory, tools)
+		finalResponse, queryResult, err := toolHandler.HandleToolCallLoop(ctx, llmClient, query, schemaContext, databaseType, conversationHistory, tools)
 
 		if err != nil {
 			ui.ShowError(fmt.Sprintf("Failed to process request: %v", err))

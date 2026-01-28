@@ -25,13 +25,21 @@ type ToolHandler struct {
 }
 
 // NewToolHandler creates a new tool handler
-func NewToolHandler(conn *db.Connection, skillsManager *skills.Manager) *ToolHandler {
+func NewToolHandler(conn *db.Connection, skillsManager *skills.Manager, llmClient *llm.Client) *ToolHandler {
+	matcher := skills.NewMatcher()
+	if llmClient != nil {
+		matcher.SetLLMClient(llmClient)
+	}
+	compressor := prompt.NewCompressor(prompt.DefaultContextWindow)
+	if llmClient != nil {
+		compressor.SetLLMClient(llmClient)
+	}
 	return &ToolHandler{
 		conn:          conn,
 		skillsManager: skillsManager,
-		matcher:       skills.NewMatcher(),
+		matcher:       matcher,
 		promptBuilder: prompt.NewBuilder(""), // Will be set in HandleToolCallLoop
-		compressor:    prompt.NewCompressor(prompt.DefaultContextWindow),
+		compressor:    compressor,
 	}
 }
 
@@ -99,6 +107,20 @@ func (h *ToolHandler) truncateString(s string, maxLen int) string {
 // ExecuteTool executes a tool call and returns the result
 func (h *ToolHandler) ExecuteTool(ctx context.Context, toolCall llm.ToolCall) (json.RawMessage, error) {
 	toolName := toolCall.Function.Name
+
+	// Check if execute_sql is called in free mode (no connection)
+	if toolName == "execute_sql" && h.conn == nil {
+		errorJSON := map[string]interface{}{
+			"status": "error",
+			"error":  "SQL execution is not available in free mode. Please select a database source to enable SQL queries.",
+		}
+		jsonData, err := json.Marshal(errorJSON)
+		if err != nil {
+			errorMsg := `{"status":"error","error":"SQL execution is not available in free mode. Please select a database source to enable SQL queries."}`
+			return json.RawMessage(errorMsg), nil
+		}
+		return json.RawMessage(jsonData), nil
+	}
 
 	// Parse arguments from JSON string
 	args, err := toolCall.ParseArguments()
@@ -364,9 +386,28 @@ func (h *ToolHandler) ExecuteTool(ctx context.Context, toolCall llm.ToolCall) (j
 
 // HandleToolCallLoop handles the complete tool calling loop
 // Returns the final response content and any query result
+// If schemaContext is empty, runs in free mode (no database connection)
 func (h *ToolHandler) HandleToolCallLoop(ctx context.Context, llmClient *llm.Client, userInput string, schemaContext string, databaseType string, conversationHistory []llm.ChatMessage, tools []llm.Function) (string, *db.QueryResult, error) {
-	// Base system prompt
-	baseSystemPrompt := fmt.Sprintf(`You are a helpful AI assistant for database queries. You can have natural conversations with users, or help them query databases using available tools.
+	// Determine mode: free mode or database mode
+	isFreeMode := schemaContext == "" || h.conn == nil
+
+	// Base system prompt - different for free mode vs database mode
+	var baseSystemPrompt string
+	if isFreeMode {
+		baseSystemPrompt = `You are a helpful AI assistant. You can have natural conversations with users and help them with various tasks using available tools.
+
+MODE: FREE MODE - No database connection available. SQL execution is not available.
+
+Available tools include:
+- execute_command: Execute shell commands (for installation, setup, system operations)
+- http_request: Make HTTP requests
+- file_operations: Read/write files
+
+IMPORTANT: The execute_sql tool is NOT available in free mode. If the user asks for database queries, inform them that they need to select a database source first.`
+	} else {
+		baseSystemPrompt = fmt.Sprintf(`You are a helpful AI assistant for database queries. You can have natural conversations with users, or help them query databases using available tools.
+
+MODE: DATABASE MODE - Connected to a database.
 
 IMPORTANT CONTEXT:
 - Database engine type: %s (this is the database system type like MySQL/PostgreSQL/seekdb, NOT a schema or database name)
@@ -391,7 +432,7 @@ Use the available tools to help users. Available tools include:
 - render_table: Format query results as a table
 - render_chart: Format query results as a chart
 
-For database queries, follow this flow:
+For database queries (database mode only), follow this flow:
 1. Use execute_sql to query the database (this returns data, does NOT display it)
 2. Decide how to present results:
    - Default: use render_table to format results as a table string when there are multiple rows/columns.
@@ -399,6 +440,12 @@ For database queries, follow this flow:
    - Summarize in text only when the user explicitly requests a summary or when data is trivial (e.g., a single value).
 3. If you call render_table or render_chart, include the returned output string in your final response.
 
+If user requests SQL execution in free mode, inform them: "SQL execution is not available in free mode. Please select a database source to enable SQL queries."
+`, databaseType, schemaContext, databaseType, databaseType, databaseType)
+	}
+
+	// Common prompt sections for both modes
+	commonPrompt := `
 For system operations (installation, setup, configuration):
 - When user requests an ACTION (install, setup, configure, run, etc.), use execute_command to execute the commands from Skills.
 - Execute commands step by step, checking results before proceeding to the next step.
@@ -429,19 +476,31 @@ When to stop tool calling and return final response:
 - If a tool fails, check the error details and decide whether to retry, modify, or report the error to the user.
 - Once the user's request is fulfilled or cannot be completed, return a final response and stop calling tools.
 
-Remember: Tools provide information (exit_code, stdout, stderr, status). You interpret this information and decide what to do next. Use your judgment to determine when tasks are complete.`, databaseType, schemaContext, databaseType, databaseType, databaseType)
+Remember: Tools provide information (exit_code, stdout, stderr, status). You interpret this information and decide what to do next. Use your judgment to determine when tasks are complete.`
 
-	// Match Skills to user query
+	// Combine base prompt with common sections
+	baseSystemPrompt = baseSystemPrompt + commonPrompt
+
+	// Match Skills to user query and manage dynamic loading/eviction
 	var loadedSkills []*skills.Skill
 	if h.skillsManager != nil {
 		metadataList := h.skillsManager.GetMetadata()
 		if len(metadataList) > 0 {
 			matchedMetadata := h.matcher.Match(userInput, metadataList)
+			
+			// Evict Skills not matched in recent queries before loading new ones
+			evicted := h.skillsManager.EvictUnusedSkills(skills.DefaultEvictionQueries)
+			if len(evicted) > 0 {
+				ui.ShowInfo(fmt.Sprintf("Evicted %d unused skill(s): %v", len(evicted), evicted))
+			}
+
 			if len(matchedMetadata) > 0 {
-				// Load matched Skills
+				// Track usage for matched Skills
 				skillNames := make([]string, len(matchedMetadata))
 				for i, md := range matchedMetadata {
 					skillNames[i] = md.Name
+					// Track usage
+					h.skillsManager.TrackUsage(md.Name, userInput)
 					// Set priority: matched Skills are relevant
 					h.skillsManager.SetPriority(md.Name, skills.PriorityRelevant)
 				}

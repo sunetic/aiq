@@ -46,38 +46,69 @@ The system SHALL load Skills progressively based on query relevance, not all at 
 - **THEN** system caches loaded content to avoid re-reading from disk
 
 ### Requirement: Skills matching algorithm
-The system SHALL match user queries to Skills using keyword-based relevance scoring.
+The system SHALL match user queries to Skills using LLM-based semantic relevance judgment, with keyword-based matching as fallback.
 
-#### Scenario: Extract query keywords
+#### Scenario: LLM semantic matching
 - **WHEN** user submits a query
-- **THEN** system extracts keywords from the query
+- **THEN** system sends query and all Skills metadata to LLM for semantic relevance judgment
 
-#### Scenario: Score Skills by relevance
-- **WHEN** system matches Skills to query
-- **THEN** system scores Skills based on: exact name match > partial name match > description keyword match
+#### Scenario: LLM returns relevant Skills
+- **WHEN** LLM processes matching request
+- **THEN** LLM returns list of relevant Skill names (top N, default 3) based on semantic understanding
+
+#### Scenario: Fallback to keyword matching
+- **WHEN** LLM semantic matching fails or is unavailable
+- **THEN** system falls back to keyword-based matching algorithm (exact name match > partial name match > description keyword match)
 
 #### Scenario: Select top N Skills
-- **WHEN** multiple Skills match a query
+- **WHEN** LLM returns relevant Skills or keyword matching completes
 - **THEN** system selects top N most relevant Skills (default: 3) for loading
 
+#### Scenario: Cache matching results
+- **WHEN** same query is matched multiple times
+- **THEN** system uses cached results (LLM or keyword) to avoid repeated processing
+
+### Requirement: Dynamic Skills management during conversation
+The system SHALL intelligently manage loaded Skills during multi-turn conversations, loading new Skills and evicting irrelevant ones.
+
+#### Scenario: Track Skills usage on each query
+- **WHEN** user sends a query and Skills are matched
+- **THEN** system tracks when each Skill was last matched/used
+
+#### Scenario: Load new Skills on each query
+- **WHEN** user sends a new query
+- **THEN** system re-matches Skills using LLM semantic matching and loads newly matched Skills
+
+#### Scenario: Evict Skills not matched in recent queries
+- **WHEN** Skills have not been matched in last N queries (default: 3)
+- **THEN** system evicts these Skills from cache, freeing up tokens
+
+#### Scenario: Keep Skills relevant to current conversation
+- **WHEN** determining which Skills to evict
+- **THEN** system keeps Skills that are still relevant to current conversation context, even if not matched in current query
+
 ### Requirement: Prompt management and compression
-The system SHALL manage prompt length with token monitoring and compression strategies.
+The system SHALL manage prompt length with token monitoring and LLM-based semantic compression strategies.
 
 #### Scenario: Estimate token count
 - **WHEN** system builds prompt for LLM
 - **THEN** system estimates token count for all prompt components (system prompt, conversation history, Skills content, tools)
 
-#### Scenario: Compress conversation history at 80% threshold
+#### Scenario: LLM compression at 80% threshold
 - **WHEN** estimated token count exceeds 80% of context window
-- **THEN** system compresses oldest conversation messages into summary, keeping recent N messages (default: 10) in full detail
+- **THEN** system uses LLM to semantically compress conversation history (moderate compression, ~50% reduction) while preserving key decisions, results, and user preferences, falling back to simple truncation if LLM compression fails
 
-#### Scenario: Evict low-priority Skills at 90% threshold
+#### Scenario: Aggressive LLM compression at 90% threshold
 - **WHEN** estimated token count exceeds 90% of context window after compression
-- **THEN** system evicts inactive Skills (not referenced in recent queries), keeping only active and relevant Skills
+- **THEN** system uses LLM for aggressive compression (~70% reduction) and evicts inactive Skills (not referenced in recent queries), keeping only active and relevant Skills
 
-#### Scenario: Aggressive compression at 95% threshold
+#### Scenario: Maximum LLM compression at 95% threshold
 - **WHEN** estimated token count exceeds 95% of context window
-- **THEN** system summarizes all conversation history except last 5 messages and keeps only top 1 most relevant Skill
+- **THEN** system uses LLM for maximum compression (~80% reduction, keep only essential context), compresses both conversation history and Skills content, and keeps only active Skills
+
+#### Scenario: Compression caching
+- **WHEN** LLM compresses conversation history or Skills content
+- **THEN** system caches compressed results (cache key: content hash, cache value: compressed content) to avoid re-compressing same content
 
 #### Scenario: Skills priority management
 - **WHEN** system manages Skills in prompt

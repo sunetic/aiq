@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 // Manager manages Skills lifecycle: loading, caching, and eviction
@@ -14,15 +15,28 @@ type Manager struct {
 	// Cache of loaded Skills (full content)
 	cache map[string]*Skill
 
+	// Usage tracking: track when each Skill was last matched/used
+	usageHistory map[string][]time.Time // Skill name -> list of usage timestamps
+	queryHistory []string                // Recent queries for context relevance
+
 	// Mutex for thread-safe access
 	mu sync.RWMutex
 }
+
+const (
+	// DefaultEvictionQueries is the default number of queries to check for eviction
+	DefaultEvictionQueries = 3
+	// MaxQueryHistory is the maximum number of recent queries to keep for context
+	MaxQueryHistory = 10
+)
 
 // NewManager creates a new Skills manager
 func NewManager() *Manager {
 	return &Manager{
 		metadataList: []*Metadata{},
 		cache:        make(map[string]*Skill),
+		usageHistory: make(map[string][]time.Time),
+		queryHistory: make([]string, 0, MaxQueryHistory),
 	}
 }
 
@@ -124,6 +138,107 @@ func (m *Manager) SetPriority(name string, priority Priority) {
 	if skill, exists := m.cache[name]; exists {
 		skill.Priority = priority
 	}
+}
+
+// TrackUsage records that a Skill was matched/used for a query
+func (m *Manager) TrackUsage(skillName string, query string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	if _, exists := m.usageHistory[skillName]; !exists {
+		m.usageHistory[skillName] = make([]time.Time, 0)
+	}
+	m.usageHistory[skillName] = append(m.usageHistory[skillName], now)
+
+	// Track query history for context relevance
+	m.queryHistory = append(m.queryHistory, query)
+	if len(m.queryHistory) > MaxQueryHistory {
+		m.queryHistory = m.queryHistory[1:]
+	}
+}
+
+// EvictUnusedSkills evicts Skills that haven't been matched in the last N queries
+func (m *Manager) EvictUnusedSkills(numQueries int) []string {
+	if numQueries <= 0 {
+		numQueries = DefaultEvictionQueries
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	evicted := make([]string, 0)
+
+	// Check each cached Skill
+	for name, skill := range m.cache {
+		// Check if Skill was used in recent queries
+		usageTimes := m.usageHistory[name]
+		if len(usageTimes) == 0 {
+			// Never used, evict if low priority
+			if skill.Priority == PriorityInactive {
+				delete(m.cache, name)
+				delete(m.usageHistory, name)
+				evicted = append(evicted, name)
+			}
+			continue
+		}
+
+		// Check if used in last N queries
+		// We approximate this by checking if last usage was recent enough
+		// (assuming queries happen within reasonable time)
+		recentUsageCount := 0
+		for i := len(usageTimes) - 1; i >= 0 && recentUsageCount < numQueries; i-- {
+			if time.Since(usageTimes[i]) < 10*time.Minute { // Consider queries within 10 minutes as "recent"
+				recentUsageCount++
+			} else {
+				break
+			}
+		}
+
+		// Also check if Skill is still relevant to current conversation context
+		isRelevant := m.isRelevantToContext(name)
+
+		// Evict if not used recently AND not relevant to context AND low priority
+		if recentUsageCount == 0 && !isRelevant && skill.Priority < PriorityActive {
+			delete(m.cache, name)
+			// Keep usage history for a while (don't delete immediately)
+			evicted = append(evicted, name)
+		}
+	}
+
+	return evicted
+}
+
+// isRelevantToContext checks if a Skill is still relevant to current conversation context
+func (m *Manager) isRelevantToContext(skillName string) bool {
+	// Simple heuristic: check if Skill name or keywords appear in recent queries
+	skillLower := fmt.Sprintf("%s", skillName) // Could enhance with metadata keywords
+	for _, query := range m.queryHistory {
+		queryLower := fmt.Sprintf("%s", query)
+		// Simple substring match (could be enhanced with better matching)
+		if len(queryLower) > 0 && len(skillLower) > 0 {
+			// Check if skill name appears in query (case-insensitive substring)
+			if len(queryLower) >= len(skillLower) {
+				for i := 0; i <= len(queryLower)-len(skillLower); i++ {
+					if queryLower[i:i+len(skillLower)] == skillLower {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+// GetUsageCount returns the number of times a Skill was used
+func (m *Manager) GetUsageCount(skillName string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if usageTimes, exists := m.usageHistory[skillName]; exists {
+		return len(usageTimes)
+	}
+	return 0
 }
 
 // EvictSkill removes a Skill from cache (for prompt compression)

@@ -31,6 +31,21 @@ func NewClient(baseURL, apiKey, model string) *Client {
 	}
 }
 
+// BaseURL returns the base URL of the LLM client
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
+// APIKey returns the API key of the LLM client
+func (c *Client) APIKey() string {
+	return c.apiKey
+}
+
+// Model returns the model name of the LLM client
+func (c *Client) Model() string {
+	return c.model
+}
+
 // ChatMessage represents a chat message
 type ChatMessage struct {
 	Role    string `json:"role"`

@@ -21,9 +21,11 @@ AIQ (AI Query) is an intelligent SQL client that enables you to interact with da
 
 - 🗣️ **Natural Language to SQL** - Ask questions in plain English or Chinese, get precise SQL queries
 - 💬 **Multi-Turn Conversation** - Maintain conversation context for refined queries and follow-up questions
+- 🆓 **Free Chat Mode** - General conversation and Skills operations without database connection
 - 📊 **Chart Visualization** - Automatic chart detection and rendering (bar, line, pie, scatter plots)
 - 🔌 **Multiple Database Support** - [seekdb](https://www.oceanbase.ai/), MySQL, and PostgreSQL
-- 🎯 **Skills System** - Extend AI capabilities with custom domain knowledge
+- 🎯 **Skills System** - Extend AI capabilities with custom domain knowledge (LLM-based semantic matching)
+- 🧠 **Intelligent Context Management** - Dynamic Skills loading/eviction and LLM-based compression
 - 🎨 **Beautiful CLI Interface** - Smooth interactions and color-coded output
 - 💾 **Session Persistence** - Save and restore conversation sessions
 
@@ -69,12 +71,24 @@ AIQ - Main Menu
 
 ### Chat Mode
 
+AIQ supports two modes:
+
+**Database Mode** (with source selected):
+- Full SQL query capabilities
+- Database schema context available
+- Chart visualization support
+
+**Free Mode** (no source selected):
+- General conversation with AI
+- Skills-based operations (execute_command, http_request, file_operations)
+- No SQL execution (select a source to enable SQL queries)
+
 **Multi-turn conversation:**
 ```
-aiq> Show total sales for last week
+aiq[source-name]> Show total sales for last week
 [Generated SQL and results...]
 
-aiq> Modify to show only last 3 days
+aiq[source-name]> Modify to show only last 3 days
 [AIQ understands context and generates updated SQL...]
 ```
 
@@ -82,6 +96,10 @@ aiq> Modify to show only last 3 days
 - `/history` - View conversation history
 - `/clear` - Clear conversation history
 - `exit` or `back` - Exit chat mode (session auto-saved)
+
+**Entering Free Mode:**
+- When no sources are configured, AIQ automatically enters free mode
+- When sources exist, select "Skip (free mode)" option in source selection menu
 
 **Session restore:**
 ```bash
@@ -97,7 +115,7 @@ AIQ automatically detects suitable chart types based on query results:
 
 ## 🎯 Skills - Extending AI Capabilities
 
-Skills allow you to extend AIQ's capabilities by providing custom instructions and context to the AI agent. Skills are automatically matched and loaded based on your queries.
+Skills allow you to extend AIQ's capabilities by providing custom instructions and context to the AI agent. Skills are automatically matched and loaded based on your queries using **LLM-based semantic matching** for improved accuracy.
 
 ### Quick Start
 
@@ -152,16 +170,28 @@ Each Skill must have:
 ### How It Works
 
 1. **On Startup**: AIQ loads metadata (name, description) from all Skills in `~/.aiqconfig/skills/`
-2. **On Query**: System extracts keywords and matches against Skills metadata
+2. **On Query**: System uses **LLM-based semantic matching** to find relevant Skills (falls back to keyword matching if LLM unavailable)
 3. **Auto-Load**: Top 3 most relevant Skills are loaded into the prompt
-4. **Smart Compression**: System automatically manages prompt length (compresses history, evicts low-priority Skills)
+4. **Dynamic Management**: System tracks Skills usage and evicts unused Skills during conversation
+5. **Smart Compression**: System automatically manages prompt length using LLM semantic compression (preserves key context while reducing tokens)
 
 ### Matching Rules
 
-Skills are matched based on relevance scoring:
-- **Exact name match** (highest priority): Query exactly matches Skill name
-- **Partial name match**: Query contains Skill name or vice versa
-- **Description keyword match**: Query keywords appear in Skill description
+Skills are matched using **LLM-based semantic understanding** for improved accuracy:
+- **Semantic Matching**: LLM understands query intent and matches Skills based on meaning, not just keywords
+- **Example**: "install mysql" matches installation Skills, not database documentation Skills (even if they mention MySQL)
+- **Fallback**: If LLM matching fails, system falls back to keyword-based matching:
+  - Exact name match (highest priority)
+  - Partial name match
+  - Description keyword match
+
+### Dynamic Skills Management
+
+During multi-turn conversations:
+- **Usage Tracking**: System tracks when each Skill was last matched/used
+- **Automatic Eviction**: Skills not matched in last 3 queries are evicted to free up tokens
+- **Context Relevance**: Skills relevant to current conversation context are kept even if not matched in current query
+- **Priority Management**: Active Skills (used recently) > Relevant Skills (matched) > Inactive Skills (not matched)
 
 ### Recommended Skills
 
@@ -178,12 +208,26 @@ Skills can use these built-in tools in their instructions:
 
 **Note**: Skills are context information, not tools themselves. They guide the AI on how to use the built-in tools.
 
-### Prompt Management
+### Prompt Management & LLM Compression
 
-System automatically manages prompt length:
-- **80% threshold**: Compress conversation history (keep last 10 messages)
-- **90% threshold**: Evict low-priority Skills (keep active and relevant)
-- **95% threshold**: Aggressive compression (keep last 5 messages and top Skills)
+System automatically manages prompt length using **LLM-based semantic compression**:
+
+- **80% threshold**: Start LLM compression (moderate compression, ~50% reduction)
+  - LLM summarizes conversation history while preserving key decisions, results, and user preferences
+  - Falls back to simple truncation if LLM compression fails
+  
+- **90% threshold**: Aggressive LLM compression (~70% reduction) + evict low-priority Skills
+  - More aggressive summarization while maintaining essential context
+  
+- **95% threshold**: Maximum LLM compression (~80% reduction, keep only essential context)
+  - Compresses both conversation history and Skills content
+  - Keeps only active Skills and essential context
+
+**Benefits of LLM Compression:**
+- Preserves important context better than simple truncation
+- Maintains conversation continuity
+- Reduces token usage while keeping essential information
+- Caches compression results to avoid re-compressing same content
 
 ### Directory Structure
 

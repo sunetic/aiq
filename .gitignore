@@ -36,3 +36,5 @@ aiq
 
 # Configuration files (user-specific)
 .config/
+
+tmp/
