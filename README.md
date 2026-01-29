@@ -115,255 +115,59 @@ AIQ - Main Menu
 
 ### Chat Mode
 
-AIQ supports two modes:
+**Database Mode** (with source selected): Full SQL query capabilities with chart visualization  
+**Free Mode** (no source selected): General conversation and Skills operations
 
-**Database Mode** (with source selected):
-- Full SQL query capabilities
-- Database schema context available
-- Chart visualization support
+**Commands:** `/history` - View history | `/clear` - Clear history | `exit`/`back` - Exit (auto-saved)
 
-**Free Mode** (no source selected):
-- General conversation with AI
-- Skills-based operations (execute_command, http_request, file_operations)
-- No SQL execution (select a source to enable SQL queries)
-
-**Multi-turn conversation:**
-```
-aiq[source-name]> Show total sales for last week
-[Generated SQL and results...]
-
-aiq[source-name]> Modify to show only last 3 days
-[AIQ understands context and generates updated SQL...]
-```
-
-**Commands:**
-- `/history` - View conversation history
-- `/clear` - Clear conversation history
-- `exit` or `back` - Exit chat mode (session auto-saved)
-
-**Entering Free Mode:**
-- When no sources are configured, AIQ automatically enters free mode
-- When sources exist, select "Skip (free mode)" option in source selection menu
-
-**Session restore:**
-```bash
-aiq -s ~/.aiq/sessions/session_20260126100000.json
-```
+**Session restore:** `aiq -s ~/.aiq/sessions/session_20260126100000.json`
 
 ### Chart Visualization
 
-AIQ automatically detects suitable chart types based on query results:
-- **Categorical + Numerical** → Bar chart or Pie chart
-- **Temporal + Numerical** → Line chart
-- **Numerical + Numerical** → Scatter plot
+Auto-detects chart types: Categorical+Numerical → Bar/Pie | Temporal+Numerical → Line | Numerical+Numerical → Scatter
 
 ## 🎯 Skills - Extending AI Capabilities
 
-Skills allow you to extend AIQ's capabilities by providing custom instructions and context to the AI agent. Skills are automatically matched and loaded based on your queries using **LLM-based semantic matching** for improved accuracy.
+Skills extend AIQ's capabilities by providing custom instructions and context. Automatically matched and loaded using **LLM-based semantic matching**.
 
 ### Quick Start
 
-1. **Create Skill directory:**
-```bash
-mkdir -p ~/.aiq/skills/my-skill
-```
-
-2. **Create SKILL.md file:**
+1. **Create Skill:** `mkdir -p ~/.aiq/skills/my-skill`
+2. **Create SKILL.md** with YAML frontmatter:
 ```markdown
 ---
 name: my-skill
-description: Domain-specific guidance for metrics, dashboards, and SQL patterns
+description: Domain-specific guidance for metrics and SQL patterns
 ---
 
 # My Custom Skill
-
-This skill provides guidance for analytics workflows and common SQL patterns.
-
-## Key Concepts
-
-- Naming conventions for metrics and dimensions
-- KPI calculation patterns and caveats
-- Time-based aggregations and cohort analysis
-
-## Usage Examples
-
-### Weekly KPI Summary
-```sql
-SELECT DATE_TRUNC('week', created_at) AS week,
-       COUNT(*) AS orders,
-       SUM(amount) AS revenue
-FROM orders
-GROUP BY week
-ORDER BY week;
+[Your instructions and examples here]
 ```
-
-3. **Restart AIQ** - Skills are loaded automatically on startup
-
-4. **Use it** - When you query about topics matching your skill's description, it will be automatically loaded
-
-### Skill File Format
-
-Each Skill must have:
-
-- **YAML Frontmatter** (required):
-  - `name`: Skill name (lowercase, use hyphens, e.g., `my-skill`)
-  - `description`: Skill description (max 200 chars, used for query matching)
-
-- **Markdown content**: Instructions, examples, and guidance
+3. **Restart AIQ** - Skills auto-load on startup
 
 ### How It Works
 
-1. **On Startup**: AIQ loads metadata (name, description) from all Skills in `~/.aiq/skills/`
-2. **On Query**: System uses **LLM-based semantic matching** to find relevant Skills (falls back to keyword matching if LLM unavailable)
-3. **Auto-Load**: Top 3 most relevant Skills are loaded into the prompt
-4. **Dynamic Management**: System tracks Skills usage and evicts unused Skills during conversation
-5. **Smart Compression**: System automatically manages prompt length using LLM semantic compression (preserves key context while reducing tokens)
-
-### Matching Rules
-
-Skills are matched using **LLM-based semantic understanding** for improved accuracy:
-- **Semantic Matching**: LLM understands query intent and matches Skills based on meaning, not just keywords
-- **Example**: "install mysql" matches installation Skills, not database documentation Skills (even if they mention MySQL)
-- **Fallback**: If LLM matching fails, system falls back to keyword-based matching:
-  - Exact name match (highest priority)
-  - Partial name match
-  - Description keyword match
-
-### Dynamic Skills Management
-
-During multi-turn conversations:
-- **Usage Tracking**: System tracks when each Skill was last matched/used
-- **Automatic Eviction**: Skills not matched in last 3 queries are evicted to free up tokens
-- **Context Relevance**: Skills relevant to current conversation context are kept even if not matched in current query
-- **Priority Management**: Active Skills (used recently) > Relevant Skills (matched) > Inactive Skills (not matched)
-
-### Recommended Skills
-
-- **[seekdb Skill](https://github.com/oceanbase/seekdb-ecology-plugins/blob/main/claudecode-plugin/skills/seekdb/SKILL.md)** - Documentation catalog and usage guidance for SeekDB
+- **Matching**: LLM-based semantic matching (falls back to keyword matching)
+- **Loading**: Top 3 most relevant Skills loaded per query
+- **Management**: Auto-evicts unused Skills, tracks usage, manages priority
+- **Compression**: LLM-based semantic compression at 80%/90%/95% thresholds
 
 ### Built-in Tools
 
-Skills can use these built-in tools in their instructions:
+Skills guide AI on using: `execute_sql`, `http_request`, `execute_command`, `file_operations`
 
-- **`execute_sql`** - Execute SQL queries against the database
-- **`http_request`** - Make HTTP requests (GET, POST, PUT, DELETE)
-- **`execute_command`** - Execute shell commands (with security allowlist)
-- **`file_operations`** - Read/write files (restricted to safe directories)
+### Recommended Skills
 
-**Note**: Skills are context information, not tools themselves. They guide the AI on how to use the built-in tools.
-
-### Prompt Management & LLM Compression
-
-System automatically manages prompt length using **LLM-based semantic compression**:
-
-- **80% threshold**: Start LLM compression (moderate compression, ~50% reduction)
-  - LLM summarizes conversation history while preserving key decisions, results, and user preferences
-  - Falls back to simple truncation if LLM compression fails
-  
-- **90% threshold**: Aggressive LLM compression (~70% reduction) + evict low-priority Skills
-  - More aggressive summarization while maintaining essential context
-  
-- **95% threshold**: Maximum LLM compression (~80% reduction, keep only essential context)
-  - Compresses both conversation history and Skills content
-  - Keeps only active Skills and essential context
-
-**Benefits of LLM Compression:**
-- Preserves important context better than simple truncation
-- Maintains conversation continuity
-- Reduces token usage while keeping essential information
-- Caches compression results to avoid re-compressing same content
-
-### Directory Structure
-
-Skills are stored in `~/.aiq/skills/<skill-name>/SKILL.md`:
-
-```
-~/.aiq/
-└── skills/
-    ├── my-skill/
-    │   └── SKILL.md
-    └── data-analysis/
-        └── SKILL.md
-```
-
-**Note**: Each Skill directory contains only one `SKILL.md` file. If you need multiple files, merge content into one file or split into multiple smaller Skills.
-
-### Troubleshooting
-
-**Skills not loaded:**
-- Check directory structure: `~/.aiq/skills/<skill-name>/SKILL.md`
-- Verify YAML frontmatter format (must start/end with `---`)
-- Ensure `name` and `description` fields exist
-- Check startup logs for errors
-
-**Skills not matched:**
-- Include relevant keywords in Skill `description`
-- Try using Skill name in your query
-- Check if multiple Skills are competing (only top 3 are selected)
+- **[seekdb Skill](https://github.com/oceanbase/seekdb-ecology-plugins/blob/main/claudecode-plugin/skills/seekdb/SKILL.md)** - SeekDB documentation and usage guidance
 
 ## ⚙️ Configuration
 
-Configuration files are stored in `~/.aiq/`:
-
-- **config/config.yaml** - LLM configuration (URL, API Key, Model)
-- **config/sources.yaml** - Database connection configurations
-- **sessions/** - Conversation session files (auto-generated)
-- **skills/** - Custom Skills (see Skills section above)
-- **bin/** - Binary executable (installed via install script)
-
-**Example config.yaml:**
-```yaml
-llm:
-  url: https://api.openai.com/v1
-  apiKey: sk-...
-  model: gpt-4
-```
-
-**Example sources.yaml:**
-```yaml
-sources:
-  - name: local-mysql
-    type: MySQL
-    host: localhost
-    port: 3306
-    database: testdb
-    username: root
-    password: password
-```
+Config files in `~/.aiq/`: `config/config.yaml` (LLM), `config/sources.yaml` (databases), `sessions/`, `skills/`, `bin/`
 
 ## 🛠️ Development
 
-### Project Structure
-
-```
-aiq/
-├── cmd/aiq/          # Main entry point
-├── internal/
-│   ├── cli/          # CLI commands and menu system
-│   ├── config/       # Configuration management
-│   ├── source/       # Data source management
-│   ├── sql/          # SQL interactive mode (chat mode)
-│   ├── skills/       # Skills system (matching, loading, management)
-│   ├── prompt/       # Prompt building and compression
-│   ├── llm/          # LLM client integration
-│   ├── db/           # Database connection and query execution
-│   ├── chart/        # Chart visualization
-│   ├── tool/         # Tool system (built-in tools)
-│   └── ui/           # UI components
-└── openspec/         # OpenSpec change management
-```
-
-### Building
-
-```bash
-go build -o aiq cmd/aiq/main.go
-```
-
-### Running Tests
-
-```bash
-go test ./...
-```
+**Build:** `go build -o aiq cmd/aiq/main.go`  
+**Test:** `go test ./...`
 
 ## 📝 License
 
