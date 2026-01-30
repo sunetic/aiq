@@ -124,16 +124,32 @@ echo -e "${GREEN}Detected platform: ${PLATFORM}${NC}"
 # Construct download URL
 GITHUB_URL="${GITHUB_RELEASES}/${LATEST_VERSION}/${BINARY_NAME}-${PLATFORM}"
 
-# Create installation directory
-mkdir -p "${INSTALL_DIR}"
-echo -e "Install directory: ${GREEN}${INSTALL_DIR}${NC}"
+# Create installation directory if it doesn't exist
+if [ ! -d "${INSTALL_DIR}" ]; then
+    mkdir -p "${INSTALL_DIR}"
+    echo -e "Created install directory: ${GREEN}${INSTALL_DIR}${NC}"
+else
+    echo -e "Install directory: ${GREEN}${INSTALL_DIR}${NC}"
+fi
+
+# Check if binary already exists
+BINARY_PATH="${INSTALL_DIR}/${BINARY_NAME}"
+if [ -f "${BINARY_PATH}" ]; then
+    echo -e "${YELLOW}Binary already exists at: ${BINARY_PATH}${NC}"
+    read -p "Overwrite existing binary? [y/N]: " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}Installation cancelled. Keeping existing binary.${NC}"
+        exit 0
+    fi
+    echo -e "${GREEN}Proceeding with overwrite...${NC}"
+fi
 
 # Download binary
 echo "Downloading binary..."
-BINARY_PATH="${INSTALL_DIR}/${BINARY_NAME}"
+echo "Download URL: ${GITHUB_URL}"
 
 # Download from GitHub (no timeout - user can Ctrl+C if too slow)
-echo "Download URL: ${GITHUB_URL}"
 if curl -fSL --progress-bar "${GITHUB_URL}" -o "${BINARY_PATH}.tmp"; then
     echo -e "${GREEN}Downloaded successfully${NC}"
 else
