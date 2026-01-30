@@ -21,7 +21,16 @@ BINARY_NAME="aiq"
 
 # Detect latest version
 echo "Detecting latest version..."
-LATEST_VERSION=$(curl -s "${GITHUB_API}" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+# Try releases API first
+LATEST_VERSION=$(curl -s --max-time 10 "${GITHUB_API}" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+
+# Fallback to tags API if releases API fails
+if [ -z "$LATEST_VERSION" ]; then
+    echo -e "${YELLOW}Releases API failed, trying tags API...${NC}"
+    LATEST_VERSION=$(curl -s --max-time 10 "https://api.github.com/repos/${REPO}/tags" 2>/dev/null | grep '"name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
+fi
+
+# Final fallback
 if [ -z "$LATEST_VERSION" ]; then
     echo -e "${YELLOW}Warning: Failed to fetch latest version from GitHub API. Using v0.0.1 as fallback.${NC}"
     LATEST_VERSION="v0.0.1"
