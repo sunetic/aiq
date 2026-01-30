@@ -84,6 +84,83 @@ func readlineWithHint(rl *readline.Instance, buildPrompt func() string, commands
 	return line, nil
 }
 
+// readMultiLineInput reads multi-line input until completion
+// Supports:
+// - System commands (single line only, immediate execution)
+// - Natural language queries (single line, immediate execution on Enter)
+// - SQL queries (multi-line until semicolon or Ctrl+D)
+// - Pasting multi-line SQL (detected by checking if next line arrives quickly)
+func readMultiLineInput(rl *readline.Instance, buildPrompt func() string, commands []string, descriptions map[string]string) (string, error) {
+	// Read first line
+	firstLine, err := readlineWithHint(rl, buildPrompt, commands, descriptions)
+	if err != nil {
+		return "", err
+	}
+
+	trimmed := strings.TrimSpace(firstLine)
+
+	// System commands are always single line, execute immediately
+	if strings.HasPrefix(trimmed, "/") {
+		return firstLine, nil
+	}
+
+	// Check if first line ends with semicolon (SQL query complete)
+	// If so, return immediately (supports single-line SQL)
+	if strings.HasSuffix(trimmed, ";") {
+		return firstLine, nil
+	}
+
+	// Check if input contains SQL-like patterns (SELECT, FROM, etc.)
+	// Only enter multi-line mode for SQL queries
+	upperLine := strings.ToUpper(trimmed)
+	isSQLLike := strings.Contains(upperLine, "SELECT") ||
+		strings.Contains(upperLine, "INSERT") ||
+		strings.Contains(upperLine, "UPDATE") ||
+		strings.Contains(upperLine, "DELETE") ||
+		strings.Contains(upperLine, "CREATE") ||
+		strings.Contains(upperLine, "ALTER") ||
+		strings.Contains(upperLine, "DROP") ||
+		strings.Contains(upperLine, "FROM") ||
+		strings.Contains(upperLine, "WHERE") ||
+		strings.Contains(upperLine, "JOIN")
+
+	if isSQLLike {
+		// SQL-like input: continue reading until semicolon or Ctrl+D
+		lines := []string{firstLine}
+		for {
+			// Show continuation prompt
+			fmt.Print(ui.HintText("    -> "))
+			line, err := rl.Readline()
+			if err != nil {
+				if err == readline.ErrInterrupt {
+					// Ctrl+C - cancel multi-line input
+					fmt.Println()
+					return "", readline.ErrInterrupt
+				}
+				// EOF (Ctrl+D) - submit what we have
+				return strings.Join(lines, "\n"), nil
+			}
+
+			lines = append(lines, line)
+			trimmedLine := strings.TrimSpace(line)
+
+			// If line ends with semicolon, input is complete
+			if strings.HasSuffix(trimmedLine, ";") {
+				return strings.Join(lines, "\n"), nil
+			}
+
+			// If empty line, also submit (allows submitting SQL without semicolon)
+			if trimmedLine == "" {
+				return strings.Join(lines[:len(lines)-1], "\n"), nil
+			}
+		}
+	}
+
+	// Natural language input: single line, execute immediately on Enter
+	// This is the default behavior - user presses Enter and query executes
+	return firstLine, nil
+}
+
 // RunSQLMode runs the SQL interactive mode
 // sessionFile is optional path to a session file to restore
 func RunSQLMode(sessionFile string) error {
@@ -292,8 +369,6 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 	fmt.Println()
 	fmt.Println()
 
-	// Store last query result for view switching
-	var lastQueryResult *db.QueryResult
 	// Store last generated SQL for execute command
 	var lastGeneratedSQL string
 
@@ -328,12 +403,13 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 	}
 
 	// Define available commands for hint display
-	commands := []string{"/exit", "/help", "/history", "/clear"}
+	commands := []string{"/exit", "/help", "/history", "/clear", "/paste"}
 	commandDescriptions := map[string]string{
 		"/exit":    "Exit chat mode",
 		"/help":    "Show help",
 		"/history": "View history",
 		"/clear":   "Clear history",
+		"/paste":   "Enter paste mode for multi-line SQL",
 	}
 
 	// Define command completer for Tab completion (only for / commands)
@@ -367,42 +443,42 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 	// For now, prompt is set once at initialization
 
 	for {
-		// Read input line with hint support
-		line, err := readlineWithHint(rl, buildPrompt, commands, commandDescriptions)
+		// Read multi-line input (supports SQL queries and natural language)
+		query, err := readMultiLineInput(rl, buildPrompt, commands, commandDescriptions)
 		if err != nil {
 			if err == readline.ErrInterrupt {
 				// Ctrl+C - continue to next prompt
 				fmt.Println()
 				continue
 			}
-			// EOF (Ctrl+D) - exit chat mode
-			fmt.Println()
-			// Save session before exiting
-			timestamp := session.GetTimestamp()
-			sessionPath, err := session.GetSessionFilePath(timestamp)
-			if err != nil {
-				ui.ShowWarning(fmt.Sprintf("Failed to generate session path: %v", err))
-			} else {
-				if err := session.SaveSession(sess, sessionPath); err != nil {
-					ui.ShowWarning(fmt.Sprintf("Failed to save session: %v", err))
+			// EOF (Ctrl+D) - exit chat mode (only if no input collected)
+			if query == "" {
+				fmt.Println()
+				// Save session before exiting
+				timestamp := session.GetTimestamp()
+				sessionPath, err := session.GetSessionFilePath(timestamp)
+				if err != nil {
+					ui.ShowWarning(fmt.Sprintf("Failed to generate session path: %v", err))
 				} else {
-					ui.ShowInfo(fmt.Sprintf("Current session saved to %s", sessionPath))
-					ui.ShowInfo(fmt.Sprintf("Run 'aiq -s %s' to continue.", sessionPath))
+					if err := session.SaveSession(sess, sessionPath); err != nil {
+						ui.ShowWarning(fmt.Sprintf("Failed to save session: %v", err))
+					} else {
+						ui.ShowInfo(fmt.Sprintf("Current session saved to %s", sessionPath))
+						ui.ShowInfo(fmt.Sprintf("Run 'aiq -s %s' to continue.", sessionPath))
+					}
 				}
+				ui.ShowInfo("Exiting chat mode (EOF).")
+				return ErrReturnToMenu
 			}
-			ui.ShowInfo("Exiting chat mode (EOF).")
-			return ErrReturnToMenu
+			// If we have input, submit it (Ctrl+D after typing submits the input)
 		}
 
-		line = strings.TrimSpace(line)
+		query = strings.TrimSpace(query)
 
 		// Handle empty input
-		if line == "" {
+		if query == "" {
 			continue
 		}
-
-		// Use the line directly as query (readline handles multi-byte characters correctly)
-		query := line
 
 		// Handle special commands - check /exit and /help first, then text commands
 		if strings.HasPrefix(query, "/") {
@@ -432,10 +508,67 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 				fmt.Println("  /help     - Show this help message")
 				fmt.Println("  /history  - View conversation history")
 				fmt.Println("  /clear    - Clear conversation history")
+				fmt.Println("  /paste    - Enter paste mode for multi-line SQL (press Ctrl+D to finish)")
 				fmt.Println()
 				fmt.Println("You can also ask questions in natural language to query the database.")
 				fmt.Println()
 				continue
+			}
+
+			// Handle /paste command - enter multi-line paste mode
+			if strings.ToLower(query) == "/paste" {
+				fmt.Println()
+				ui.ShowInfo("Paste mode: Paste your multi-line SQL, then press Ctrl+D to submit (or Enter on empty line)")
+				fmt.Println()
+				var pasteLines []string
+				for {
+					fmt.Print(ui.HintText("paste> "))
+					line, err := rl.Readline()
+					if err != nil {
+						if err == readline.ErrInterrupt {
+							// Ctrl+C - cancel paste mode
+							fmt.Println()
+							ui.ShowWarning("Paste mode cancelled.")
+							fmt.Println()
+							break
+						}
+						// EOF (Ctrl+D) - submit pasted content
+						if len(pasteLines) > 0 {
+							query = strings.Join(pasteLines, "\n")
+							// Remove the /paste command from query processing
+							query = strings.TrimSpace(query)
+							if query != "" {
+								// Process the pasted SQL as a normal query
+								break
+							}
+						}
+						fmt.Println()
+						ui.ShowWarning("No content pasted.")
+						fmt.Println()
+						break
+					}
+
+					trimmedLine := strings.TrimSpace(line)
+					// Empty line signals end of paste (alternative to Ctrl+D)
+					if trimmedLine == "" && len(pasteLines) > 0 {
+						query = strings.Join(pasteLines, "\n")
+						query = strings.TrimSpace(query)
+						if query != "" {
+							break
+						}
+					}
+
+					if trimmedLine != "" {
+						pasteLines = append(pasteLines, line)
+					}
+				}
+
+				// If we collected paste content, continue to process it
+				if len(pasteLines) > 0 {
+					// query is already set above, continue to process it
+				} else {
+					continue
+				}
 			}
 		}
 
@@ -502,9 +635,6 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 			}
 			// Tool success message is displayed by tool.ExecuteSQL
 
-			// Store result for potential view switching
-			lastQueryResult = result
-
 			// Display results
 			fmt.Println()
 			if len(result.Rows) == 0 {
@@ -520,52 +650,6 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 			ui.PrintTable(result.Columns, result.Rows)
 			fmt.Println()
 			continue
-		}
-
-		// Check if this is a view switching command (e.g., "display as pie chart", "show as bar")
-		queryLower := strings.ToLower(query)
-		isViewSwitch := (strings.Contains(queryLower, "display as") || strings.Contains(queryLower, "show as") ||
-			strings.Contains(queryLower, "view as") || strings.Contains(queryLower, "render as")) &&
-			(strings.Contains(queryLower, "chart") || strings.Contains(queryLower, "pie") ||
-				strings.Contains(queryLower, "bar") || strings.Contains(queryLower, "line") ||
-				strings.Contains(queryLower, "scatter") || strings.Contains(queryLower, "table"))
-
-		// If it's a view switch command and we have last query result, use it directly with tools
-		if isViewSwitch && lastQueryResult != nil {
-			// Extract chart type from query
-			chartType := detectChartTypeFromQuery(queryLower)
-			if chartType != "" {
-				// Display the last result with the requested chart type
-				if chartType == "table" {
-					ui.PrintTable(lastQueryResult.Columns, lastQueryResult.Rows)
-					fmt.Println()
-				} else {
-					// Basic guard: chart types need at least 2 columns
-					if len(lastQueryResult.Columns) < 2 {
-						ui.ShowWarning(fmt.Sprintf("Cannot render %s chart: requires at least 2 columns. Showing table instead.", chartType))
-						ui.PrintTable(lastQueryResult.Columns, lastQueryResult.Rows)
-						fmt.Println()
-						// Add to conversation history
-						sess.AddMessage("user", query)
-						sess.AddMessage("assistant", fmt.Sprintf("Displayed results as table (chart requires at least 2 columns)."))
-						continue
-					}
-					chartOutput, err := tool.RenderChartString(lastQueryResult, chartType)
-					if err != nil {
-						ui.ShowWarning(fmt.Sprintf("Cannot render %s chart: %v. Showing table instead.", chartType, err))
-						ui.ShowInfo("Displaying table view instead.")
-						ui.PrintTable(lastQueryResult.Columns, lastQueryResult.Rows)
-					} else {
-						title := fmt.Sprintf("Chart (%d rows)", len(lastQueryResult.Rows))
-						ui.DisplayChart(chartOutput, chartType, title)
-					}
-					fmt.Println()
-				}
-				// Add to conversation history
-				sess.AddMessage("user", query)
-				sess.AddMessage("assistant", fmt.Sprintf("Displaying results as %s chart.", chartType))
-				continue
-			}
 		}
 
 		// Convert existing session messages to LLM chat messages (before adding current query)
@@ -614,9 +698,16 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 		// Add user message to history
 		sess.AddMessage("user", query)
 
-		// Store query result for potential view switching
+		// Add query result summary to conversation history
 		if queryResult != nil {
-			lastQueryResult = queryResult
+			// Format result summary for conversation history
+			resultSummary := formatQueryResultSummary(queryResult)
+			// Append summary to final response so it's included in conversation history
+			if finalResponse != "" {
+				finalResponse = finalResponse + "\n\n" + resultSummary
+			} else {
+				finalResponse = resultSummary
+			}
 		}
 
 		// Display final response
@@ -711,24 +802,4 @@ func getChartTypeLabel(ct chart.ChartType) string {
 	default:
 		return "Unknown chart type"
 	}
-}
-
-// detectChartTypeFromQuery extracts chart type from user query
-func detectChartTypeFromQuery(queryLower string) string {
-	if strings.Contains(queryLower, "pie") {
-		return "pie"
-	}
-	if strings.Contains(queryLower, "bar") {
-		return "bar"
-	}
-	if strings.Contains(queryLower, "line") {
-		return "line"
-	}
-	if strings.Contains(queryLower, "scatter") {
-		return "scatter"
-	}
-	if strings.Contains(queryLower, "table") {
-		return "table"
-	}
-	return ""
 }

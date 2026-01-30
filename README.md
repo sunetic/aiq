@@ -122,6 +122,8 @@ AIQ - Main Menu
 
 **Session restore:** `aiq -s ~/.aiq/sessions/session_20260126100000.json`
 
+**Version:** `aiq -v` or `aiq --version` - Display version and commit ID
+
 ### Chart Visualization
 
 Auto-detects chart types: Categorical+Numerical → Bar/Pie | Temporal+Numerical → Line | Numerical+Numerical → Scatter

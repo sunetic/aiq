@@ -1,28 +1,3 @@
-## ADDED Requirements
-
-### Requirement: Chart type detection
-The system SHALL automatically detect appropriate chart type based on query result structure.
-
-#### Scenario: Detect bar chart
-- **WHEN** query result has 2 columns where first column is categorical (string) and second is numerical
-- **THEN** system detects bar chart as appropriate type
-
-#### Scenario: Detect line chart
-- **WHEN** query result has 2 columns where first column is temporal (date/time) or sequential numeric and second is numerical
-- **THEN** system detects line chart as appropriate type
-
-#### Scenario: Detect pie chart
-- **WHEN** query result has 2 columns where first is categorical, second is numerical, and number of categories is small (< 10)
-- **THEN** system detects pie chart as appropriate type
-
-#### Scenario: Detect scatter plot
-- **WHEN** query result has 2+ numerical columns with multiple rows
-- **THEN** system detects scatter plot as appropriate type
-
-#### Scenario: Fallback to table
-- **WHEN** query result structure doesn't match any chart type pattern
-- **THEN** system defaults to table view
-
 ## MODIFIED Requirements
 
 ### Requirement: Chart rendering option
@@ -67,36 +42,14 @@ The system SHALL render charts using ASCII/Unicode characters in terminal, trigg
 - **WHEN** LLM calls render_chart tool with scatter plot type
 - **THEN** system renders scatter plot with data points
 
-### Requirement: Chart customization
-The system SHALL allow users to customize chart appearance and settings.
+## REMOVED Requirements
 
-#### Scenario: Override chart type
-- **WHEN** user wants different chart type than auto-detected
-- **THEN** system provides option to manually select chart type
+### Requirement: Chart rendering option (prompt-based)
+**Reason**: Replaced by LLM-based decision making. System no longer prompts user to choose view type after query execution. Instead, users request charts naturally and LLM interprets and handles the request.
 
-#### Scenario: Customize chart colors
-- **WHEN** user selects chart customization
-- **THEN** system provides predefined color palette options
+**Migration**: Users can request charts at any time using natural language (e.g., "display as pie chart"). No need to wait for prompt after query execution. LLM will handle the request based on available query results in conversation history.
 
-#### Scenario: Set chart title and labels
-- **WHEN** user customizes chart
-- **THEN** system allows setting chart title and axis labels
+### Requirement: Chart display integration (prompt-based)
+**Reason**: Removed prompt-based chart selection workflow. Chart display is now handled entirely through LLM tool calling based on user's natural language requests.
 
-### Requirement: Chart rendering constraints
-The system SHALL handle edge cases and limitations gracefully.
-
-#### Scenario: Large dataset handling
-- **WHEN** query result has more than 1000 data points
-- **THEN** system warns user and offers to sample data or render subset
-
-#### Scenario: Terminal compatibility
-- **WHEN** terminal doesn't support Unicode characters
-- **THEN** system falls back to ASCII-only chart rendering
-
-#### Scenario: Single column result
-- **WHEN** query result has only one column
-- **THEN** system suggests table view only (no chart option)
-
-#### Scenario: Non-numerical data
-- **WHEN** query result columns don't contain numerical data suitable for charts
-- **THEN** system defaults to table view with appropriate message
+**Migration**: Users can request charts naturally after seeing query results. LLM will interpret the request and call appropriate tools. No breaking changes - same functionality, different implementation approach.

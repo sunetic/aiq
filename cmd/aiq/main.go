@@ -12,9 +12,18 @@ import (
 	"github.com/aiq/aiq/internal/source"
 	"github.com/aiq/aiq/internal/sql"
 	"github.com/aiq/aiq/internal/ui"
+	"github.com/aiq/aiq/internal/version"
 )
 
 func main() {
+	// Handle version command flags before any initialization
+	for _, arg := range os.Args[1:] {
+		if arg == "-v" || arg == "--version" {
+			fmt.Println(version.GetVersionInfo())
+			os.Exit(0)
+		}
+	}
+
 	// Ensure directory structure exists (needed for prompt initialization)
 	if err := config.EnsureDirectoryStructure(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to create config directory structure: %v\n", err)

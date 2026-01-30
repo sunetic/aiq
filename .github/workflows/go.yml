@@ -71,7 +71,8 @@ jobs:
       - name: Build for ${{ matrix.platform.name }}
         run: |
           # 使用矩阵中的变量进行交叉编译
-          GOOS=${{ matrix.platform.goos }} GOARCH=${{ matrix.platform.goarch }} go build -o "bin/aiq-${{ matrix.platform.name }}${{ matrix.platform.ext }}" ./cmd/aiq
+          # 注入版本号和 commit ID
+          GOOS=${{ matrix.platform.goos }} GOARCH=${{ matrix.platform.goarch }} go build -ldflags "-X github.com/aiq/aiq/internal/version.Version=${{ github.ref_name }} -X github.com/aiq/aiq/internal/version.CommitID=${{ github.sha }}" -o "bin/aiq-${{ matrix.platform.name }}${{ matrix.platform.ext }}" ./cmd/aiq
         env:
           # 传递环境变量给 go build 命令
           GOOS: ${{ matrix.platform.goos }}

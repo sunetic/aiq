@@ -137,6 +137,37 @@ func (h *ToolHandler) truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// formatQueryResultSummary formats a query result into a concise summary for conversation history
+// Returns a string like: "Query executed successfully. Returned 5 rows with columns: [name, email, age]. Sample data: [John Doe, john@example.com, 30], [Jane Smith, jane@example.com, 25]"
+func formatQueryResultSummary(result *db.QueryResult) string {
+	if result == nil || len(result.Columns) == 0 {
+		return "Query executed successfully."
+	}
+
+	rowCount := len(result.Rows)
+	columnsStr := fmt.Sprintf("[%s]", strings.Join(result.Columns, ", "))
+
+	var sampleRows []string
+	sampleCount := 3
+	if rowCount < sampleCount {
+		sampleCount = rowCount
+	}
+
+	for i := 0; i < sampleCount; i++ {
+		row := result.Rows[i]
+		rowStr := fmt.Sprintf("[%s]", strings.Join(row, ", "))
+		sampleRows = append(sampleRows, rowStr)
+	}
+
+	sampleDataStr := strings.Join(sampleRows, ", ")
+
+	if rowCount == 0 {
+		return fmt.Sprintf("Query executed successfully. No rows returned. Columns: %s", columnsStr)
+	}
+
+	return fmt.Sprintf("Query executed successfully. Returned %d row(s) with columns: %s. Sample data: %s", rowCount, columnsStr, sampleDataStr)
+}
+
 // ExecuteTool executes a tool call and returns the result
 func (h *ToolHandler) ExecuteTool(ctx context.Context, toolCall llm.ToolCall) (json.RawMessage, error) {
 	toolName := toolCall.Function.Name
@@ -476,12 +507,14 @@ You are a helpful AI assistant for database queries and related tasks.
 - Use execute_sql for database queries. Do not use execute_command to run mysql/psql.
 - Respect engine-specific syntax. If unsure, ask a clarifying question or rely on schema context.
 - If a request is not a database query, use the appropriate non-SQL tools.
+- **CRITICAL**: Before generating new SQL queries, check conversation history for recent query results. If the user requests visualization (chart/table) and recent query results are available, use render_chart or render_table with the existing data instead of generating new SQL.
+- Only generate new SQL queries if the user explicitly requests different data or if no recent query results are available.
 </POLICY>
 
 <TOOLS>
 - execute_sql: Execute SQL queries against the database.
-- render_table: Format query results as a table.
-- render_chart: Format query results as a chart when user explicitly asks for visualization.
+- render_table: Format query results as a table. **PRIORITY**: Check conversation history for recent query results first.
+- render_chart: **MANDATORY**: When user requests chart visualization, you MUST call this tool. Do NOT return text descriptions or JSON. Check conversation history for recent query results first.
 - execute_command: System operations (install, setup, configuration). Not for database queries.
 - http_request: Make HTTP requests.
 - file_operations: Read/write files.
@@ -865,6 +898,35 @@ You are a helpful AI assistant for database queries and related tasks.
 				}
 			}
 
+			// For render_chart: directly display chart output to user
+			if toolCall.Function.Name == "render_chart" && err == nil {
+				var resultData map[string]interface{}
+				if err := json.Unmarshal(toolResult, &resultData); err == nil {
+					if output, ok := resultData["output"].(string); ok && output != "" {
+						chartType, _ := resultData["chart_type"].(string)
+						rowCount := 0
+						if rc, ok := resultData["row_count"].(float64); ok {
+							rowCount = int(rc)
+						} else if rc, ok := resultData["row_count"].(int); ok {
+							rowCount = rc
+						}
+						title := fmt.Sprintf("Chart (%d rows)", rowCount)
+						ui.DisplayChart(output, chartType, title)
+
+						// Simplify result for LLM - chart already displayed
+						simplifiedResult := map[string]interface{}{
+							"status":      "success",
+							"displayed":   true,
+							"chart_type":  chartType,
+							"row_count":   rowCount,
+							"instruction": "Chart already displayed to user. Do NOT repeat or describe the chart. Just confirm completion or ask if user needs anything else.",
+						}
+						simplifiedJSON, _ := json.Marshal(simplifiedResult)
+						toolResult = json.RawMessage(simplifiedJSON)
+					}
+				}
+			}
+
 			// For execute_sql: directly render table output (mysql client style)
 			// and simplify the result sent to LLM
 			if toolCall.Function.Name == "execute_sql" && err == nil {
@@ -887,10 +949,11 @@ You are a helpful AI assistant for database queries and related tasks.
 									}
 								}
 							}
-							lastQueryResult = &db.QueryResult{
+							queryResult := &db.QueryResult{
 								Columns: cols,
 								Rows:    rowsData,
 							}
+							lastQueryResult = queryResult
 
 							// Directly render table output (mysql client style)
 							if len(rowsData) > 0 {
@@ -902,13 +965,17 @@ You are a helpful AI assistant for database queries and related tasks.
 								fmt.Printf("%d row(s) in set\n", len(rowsData))
 							}
 
-							// Simplify result for LLM - don't send raw data
-							// Explicitly instruct LLM not to repeat the data
+							// Format result summary for conversation history
+							resultSummary := formatQueryResultSummary(queryResult)
+
+							// Simplify result for LLM - include summary for conversation history
+							// The summary will be included in LLM's response and added to conversation history
 							simplifiedResult := map[string]interface{}{
-								"status":      "success",
-								"row_count":   len(rowsData),
-								"displayed":   true,
-								"instruction": "Results already displayed to user in table format. Do NOT list, repeat, or summarize the data. Just confirm completion or ask if user needs anything else.",
+								"status":         "success",
+								"row_count":      len(rowsData),
+								"displayed":      true,
+								"result_summary": resultSummary,
+								"instruction":    "Results already displayed to user in table format. Do NOT list, repeat, or summarize the data. Just confirm completion or ask if user needs anything else.",
 							}
 							simplifiedJSON, _ := json.Marshal(simplifiedResult)
 							toolResult = json.RawMessage(simplifiedJSON)
