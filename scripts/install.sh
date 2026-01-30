@@ -30,10 +30,12 @@ if [ -z "$LATEST_VERSION" ]; then
     LATEST_VERSION=$(curl -s --max-time 10 "https://api.github.com/repos/${REPO}/tags" 2>/dev/null | grep '"name":' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || echo "")
 fi
 
-# Final fallback
+# Fail if version detection failed
 if [ -z "$LATEST_VERSION" ]; then
-    echo -e "${YELLOW}Warning: Failed to fetch latest version from GitHub API. Using v0.0.1 as fallback.${NC}"
-    LATEST_VERSION="v0.0.1"
+    echo -e "${RED}Error: Failed to fetch latest version from GitHub API.${NC}"
+    echo -e "${YELLOW}Please check your network connection and try again.${NC}"
+    echo -e "${YELLOW}You can also manually download from: https://github.com/${REPO}/releases${NC}"
+    exit 1
 fi
 echo -e "${GREEN}Latest version: ${LATEST_VERSION}${NC}"
 
