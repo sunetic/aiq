@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aiq/aiq/internal/ui"
 )
 
 // CommandTool handles command execution
@@ -71,7 +73,7 @@ type CommandParams struct {
 	Command    string   `json:"command"`
 	Args       []string `json:"args,omitempty"`
 	WorkingDir string   `json:"working_dir,omitempty"`
-	Timeout    int      `json:"timeout,omitempty"` // Timeout in seconds, default 30
+	Timeout    int      `json:"timeout,omitempty"` // Timeout in seconds, default 60
 }
 
 // OutputCallback is called when command produces output (for real-time display)
@@ -144,58 +146,44 @@ func (t *CommandTool) ExecuteWithCallback(ctx context.Context, params map[string
 		return nil, fmt.Errorf("command is required")
 	}
 
-	// Parse command and args, handling environment variables (e.g., "LC_ALL=C command")
-	parts := strings.Fields(cmdParams.Command)
-	if len(parts) == 0 {
-		return nil, fmt.Errorf("invalid command")
-	}
-
-	// Extract environment variables and find the actual command name
-	var cmdName string
-	var cmdArgs []string
-	var envVars []string
-	cmdStartIdx := 0
-
-	for i, part := range parts {
-		// Check if this part is an environment variable assignment (VAR=value format)
-		if strings.Contains(part, "=") && !strings.HasPrefix(part, "-") {
-			// This is an environment variable, collect it
-			envVars = append(envVars, part)
-			continue
-		}
-		// Found the actual command
-		cmdName = part
-		cmdStartIdx = i
-		break
-	}
-
-	if cmdName == "" {
-		return nil, fmt.Errorf("no valid command found in: %s", cmdParams.Command)
-	}
-
-	// Check if command is blocked (blacklist approach: allow all except blocked)
-	if t.blockedCommands[cmdName] {
-		return nil, fmt.Errorf("command '%s' is blocked for security reasons. Blocked commands: %v", cmdName, t.getBlockedCommandList())
-	}
-
 	// Check if command requires sudo (commands with sudo need user interaction for password)
 	if strings.Contains(cmdParams.Command, "sudo ") || strings.HasPrefix(cmdParams.Command, "sudo ") {
 		return nil, fmt.Errorf("command requires sudo privileges and cannot be executed automatically. Please run this command manually in your terminal: %s", cmdParams.Command)
 	}
 
-	// Check if command requires interactive input
-	if t.interactiveCommands[cmdName] {
-		return nil, fmt.Errorf("command '%s' requires interactive input and cannot be executed non-interactively. Please run this command manually in your terminal, or use a non-interactive alternative if available", cmdName)
+	// Extract environment variables from command (e.g., "LC_ALL=C command")
+	var envVars []string
+	parts := strings.Fields(cmdParams.Command)
+	for _, part := range parts {
+		if strings.Contains(part, "=") && !strings.HasPrefix(part, "-") {
+			envVars = append(envVars, part)
+		} else {
+			break
+		}
 	}
 
-	// Get command arguments (everything after the command name)
-	cmdArgs = parts[cmdStartIdx+1:]
-	if len(cmdParams.Args) > 0 {
-		cmdArgs = cmdParams.Args
+	// Check if first command (after env vars) is blocked
+	if len(parts) > len(envVars) {
+		firstCmd := parts[len(envVars)]
+		if t.blockedCommands[firstCmd] {
+			return nil, fmt.Errorf("command '%s' is blocked for security reasons. Blocked commands: %v", firstCmd, t.getBlockedCommandList())
+		}
+		if t.interactiveCommands[firstCmd] {
+			return nil, fmt.Errorf("command '%s' requires interactive input and cannot be executed non-interactively. Please run this command manually in your terminal, or use a non-interactive alternative if available", firstCmd)
+		}
 	}
+
+	// Use shell to execute all commands - simpler and handles all shell features
+	// Detect shell: prefer sh, fallback to bash if sh not available
+	shell := "/bin/sh"
+	if _, err := exec.LookPath("sh"); err != nil {
+		shell = "/bin/bash"
+	}
+	cmdName := shell
+	cmdArgs := []string{"-c", cmdParams.Command}
 
 	// Set idle timeout (timeout resets when there's output)
-	idleTimeout := 30 * time.Second
+	idleTimeout := 60 * time.Second
 	if cmdParams.Timeout > 0 {
 		idleTimeout = time.Duration(cmdParams.Timeout) * time.Second
 	}
@@ -353,8 +341,21 @@ func (t *CommandTool) ExecuteWithCallback(ctx context.Context, params map[string
 
 		case <-idleTimer.C:
 			// Idle timeout - no output for too long
-			cmd.Process.Kill()
-			return nil, fmt.Errorf("command execution timeout: no output for %v", idleTimeout)
+			// Ask user if they want to continue waiting
+			continueWaiting, err := ui.ShowConfirm(
+				fmt.Sprintf("Command has been idle for %v. Continue waiting?", idleTimeout))
+			if err != nil {
+				// User interrupted (Ctrl+C), treat as cancellation
+				cmd.Process.Kill()
+				return nil, fmt.Errorf("command execution cancelled by user")
+			}
+			if !continueWaiting {
+				// User chose not to continue
+				cmd.Process.Kill()
+				return nil, fmt.Errorf("command execution timeout: no output for %v", idleTimeout)
+			}
+			// User chose to continue, reset the timer
+			idleTimer.Reset(idleTimeout)
 
 		case <-ctx.Done():
 			// Parent context cancelled
@@ -398,7 +399,7 @@ func (t *CommandTool) GetDefinition() map[string]interface{} {
 					},
 					"timeout": map[string]interface{}{
 						"type":        "integer",
-						"description": "Timeout in seconds (default: 30)",
+						"description": "Timeout in seconds (default: 60)",
 					},
 				},
 				"required": []string{"command"},

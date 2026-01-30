@@ -156,35 +156,10 @@ func (h *ToolHandler) ExecuteTool(ctx context.Context, toolCall llm.ToolCall) (j
 	}
 
 	// Parse arguments from JSON string
+	// All JSON parsing errors are handled in ParseArguments()
 	args, err := toolCall.ParseArguments()
 	if err != nil {
-		// Try to handle case where LLM returns a plain string instead of JSON
-		// This can happen if the LLM misunderstands the format
-		argsStr := strings.TrimSpace(toolCall.Function.Arguments)
-		if strings.HasPrefix(argsStr, `"`) && strings.HasSuffix(argsStr, `"`) {
-			// It's a JSON string, try to unwrap it
-			var unwrapped string
-			if jsonErr := json.Unmarshal([]byte(argsStr), &unwrapped); jsonErr == nil {
-				// Try to parse the unwrapped string as JSON
-				if jsonErr2 := json.Unmarshal([]byte(unwrapped), &args); jsonErr2 == nil {
-					// Successfully parsed
-				} else {
-					// Still not JSON, treat as a single string parameter
-					// For execute_command, use it as the command
-					if toolName == "execute_command" {
-						args = map[string]interface{}{
-							"command": unwrapped,
-						}
-					} else {
-						return nil, fmt.Errorf("failed to parse tool arguments: expected JSON object, got string: %s. Original error: %w", argsStr, err)
-					}
-				}
-			} else {
-				return nil, fmt.Errorf("failed to parse tool arguments: %w. Arguments received: %s", err, h.truncateString(argsStr, 100))
-			}
-		} else {
-			return nil, fmt.Errorf("failed to parse tool arguments: %w. Arguments received: %s", err, h.truncateString(argsStr, 100))
-		}
+		return nil, err
 	}
 
 	switch toolName {

@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Command execution display optimization
 The system SHALL display command execution output in a user-friendly manner that avoids screen flooding, provides real-time feedback, and intelligently truncates output for LLM processing.

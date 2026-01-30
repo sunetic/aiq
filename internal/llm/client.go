@@ -70,23 +70,48 @@ type ToolCall struct {
 }
 
 // ParseArguments parses the arguments JSON string into a map
+// Handles various JSON encoding formats including double-encoded strings, nested quotes, and escape sequences
 func (tc *ToolCall) ParseArguments() (map[string]interface{}, error) {
+	const maxUnquoteDepth = 10
 	argsStr := tc.Function.Arguments
+	originalArgs := argsStr
 
-	// Handle double-encoded JSON (LLM sometimes returns JSON as a string)
-	// e.g., "{\"command\":\"brew list mysql\"}" instead of {"command":"brew list mysql"}
-	if len(argsStr) >= 2 && argsStr[0] == '"' && argsStr[len(argsStr)-1] == '"' {
-		// Try to unquote the string first
-		var unquoted string
-		if err := json.Unmarshal([]byte(argsStr), &unquoted); err == nil {
-			argsStr = unquoted
+	// Recursively unquote JSON strings until we can't unquote anymore or reach max depth
+	for depth := 0; depth < maxUnquoteDepth; depth++ {
+		trimmed := strings.TrimSpace(argsStr)
+		// Check if it's a quoted JSON string
+		if len(trimmed) < 2 || trimmed[0] != '"' || trimmed[len(trimmed)-1] != '"' {
+			break
 		}
+		// Try to unquote the string
+		var unquoted string
+		if err := json.Unmarshal([]byte(trimmed), &unquoted); err != nil {
+			// Can't unquote further, stop
+			break
+		}
+		argsStr = unquoted
 	}
 
+	// Try to parse as JSON object
 	var args map[string]interface{}
 	if err := json.Unmarshal([]byte(argsStr), &args); err != nil {
-		return nil, fmt.Errorf("failed to parse arguments: %w", err)
+		// Truncate original args for error message (max 100 chars)
+		truncatedOriginal := originalArgs
+		if len(truncatedOriginal) > 100 {
+			truncatedOriginal = truncatedOriginal[:100] + "..."
+		}
+		return nil, fmt.Errorf("failed to parse arguments after unquoting: %w (original: %s)", err, truncatedOriginal)
 	}
+
+	// Validate that we got a valid JSON object (not null, array, or primitive)
+	if args == nil {
+		truncatedOriginal := originalArgs
+		if len(truncatedOriginal) > 100 {
+			truncatedOriginal = truncatedOriginal[:100] + "..."
+		}
+		return nil, fmt.Errorf("failed to parse arguments: expected JSON object, got null (original: %s)", truncatedOriginal)
+	}
+
 	return args, nil
 }
 
