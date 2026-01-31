@@ -6,7 +6,7 @@
 - [x] 1.4 Implement helper functions for creating temporary sessions
 - [x] 1.5 Implement helper functions for creating temporary directories
 - [x] 1.6 Implement helper functions for loading test fixtures
-- [ ] 1.7 Create mock implementations for UI components (if needed)
+- [x] 1.7 Create mock implementations for UI components (if needed)
 - [x] 1.8 Document testing patterns and conventions
 
 ## 2. Unit Tests for Prompt Management
@@ -48,18 +48,18 @@
 - [x] 5.7 Test HTTP tool GET requests (low risk, automatic execution)
 - [x] 5.8 Test HTTP tool POST/DELETE requests (high risk, confirmation)
 - [x] 5.9 Test HTTP tool error handling (network errors, timeouts)
-- [ ] 5.10 Test SQL tool SELECT queries (low risk, automatic execution)
-- [ ] 5.11 Test SQL tool DROP/TRUNCATE (high risk, confirmation)
-- [ ] 5.12 Test SQL tool error handling (syntax errors, constraint violations)
-- [ ] 5.13 Test SQL tool result formatting
+- [x] 5.10 Test SQL tool SELECT queries (low risk, automatic execution)
+- [x] 5.11 Test SQL tool DROP/TRUNCATE (high risk, confirmation)
+- [x] 5.12 Test SQL tool error handling (syntax errors, constraint violations)
+- [x] 5.13 Test SQL tool result formatting
 
 ## 6. Unit Tests for Error Extraction
 
-- [ ] 6.1 Test structured error extraction (error code, type, affected resources)
-- [ ] 6.2 Test MySQL error parsing (foreign key constraints, syntax errors)
-- [ ] 6.3 Test PostgreSQL error parsing (constraint violations, syntax errors)
-- [ ] 6.4 Test error dependency identification
-- [ ] 6.5 Test suggested actions generation
+- [x] 6.1 Test structured error extraction (error code, type, affected resources)
+- [x] 6.2 Test MySQL error parsing (foreign key constraints, syntax errors)
+- [x] 6.3 Test PostgreSQL error parsing (constraint violations, syntax errors)
+- [x] 6.4 Test error dependency identification
+- [x] 6.5 Test suggested actions generation
 
 ## 7. Unit Tests for Configuration Management
 
