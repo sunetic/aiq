@@ -1,12 +1,13 @@
 package session
 
 import (
+	"encoding/json"
 	"time"
 )
 
-// Message represents a single message in the conversation
+// Message represents a single message in the conversation (legacy format, for backward compatibility)
 type Message struct {
-	Role      string    `json:"role"`      // "user" or "assistant"
+	Role      string    `json:"role"` // "user" or "assistant"
 	Content   string    `json:"content"`
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -21,8 +22,9 @@ type SessionMetadata struct {
 
 // Session represents a conversation session
 type Session struct {
-	Metadata SessionMetadata `json:"metadata"`
-	Messages []Message       `json:"messages"`
+	Metadata    SessionMetadata   `json:"metadata"`
+	Messages    []Message         `json:"messages,omitempty"`     // Legacy format, for backward compatibility
+	RawMessages []json.RawMessage `json:"raw_messages,omitempty"` // Complete messages array (includes tool calls and results)
 }
 
 // NewSession creates a new session with the given data source and database type

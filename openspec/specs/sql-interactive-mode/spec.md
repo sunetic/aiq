@@ -60,19 +60,46 @@ The system SHALL translate user's natural language questions into SQL queries us
 - **THEN** system sends question to LLM API with database schema context
 
 #### Scenario: Receive SQL translation
-- **WHEN** LLM returns SQL query
-- **THEN** system displays translated SQL query to user
+- **WHEN** LLM returns SQL query (in tool call)
+- **THEN** system checks risk level before displaying or executing
+- **AND** if low-risk, execute automatically without displaying SQL first
+- **AND** if high-risk or unknown, display SQL and ask for confirmation
 
 #### Scenario: Confirm SQL execution
-- **WHEN** SQL is translated
+- **WHEN** SQL is translated and requires confirmation (high-risk)
 - **THEN** system prompts user to confirm execution or modify query
 
 ### Requirement: SQL query execution
-The system SHALL execute SQL queries against the selected database connection.
+The system SHALL execute SQL queries against the selected database connection using risk-based confirmation.
+
+#### Scenario: Low-risk SQL executes automatically
+- **WHEN** LLM calls execute_sql tool with risk_level="low" or SQL matches whitelist (SELECT, SHOW, DESCRIBE, EXPLAIN)
+- **THEN** system executes SQL automatically without user confirmation
+- **AND** system displays results directly to user
+
+#### Scenario: High-risk SQL requires confirmation
+- **WHEN** LLM calls execute_sql tool with risk_level="high" or risk_level="medium", or SQL does not match whitelist
+- **THEN** system displays SQL query to user
+- **AND** system prompts user to confirm execution: "Execute this query? [y/N]"
+- **AND** system waits for user confirmation before executing
+
+#### Scenario: LLM provides risk level in tool call
+- **WHEN** LLM calls execute_sql tool
+- **THEN** LLM can optionally include risk_level field in arguments ("low", "medium", "high")
+- **AND** system prioritizes LLM-provided risk_level over code-level rules
+- **AND** if risk_level="low", execute automatically
+- **AND** if risk_level="medium" or "high", require confirmation
+
+#### Scenario: Code whitelist fallback for SQL
+- **WHEN** LLM calls execute_sql tool without risk_level field
+- **THEN** system checks SQL statement against code whitelist (SELECT, SHOW, DESCRIBE, EXPLAIN)
+- **AND** if SQL matches whitelist pattern, execute automatically
+- **AND** if SQL does not match whitelist, require confirmation (conservative default)
 
 #### Scenario: Execute confirmed query
-- **WHEN** user confirms SQL execution
+- **WHEN** user confirms SQL execution (for high-risk operations)
 - **THEN** system executes query against selected database
+- **AND** system displays results after execution
 
 #### Scenario: Display query results
 - **WHEN** query executes successfully
@@ -81,6 +108,23 @@ The system SHALL execute SQL queries against the selected database connection.
 #### Scenario: Handle query errors
 - **WHEN** query execution fails
 - **THEN** system displays clear error message and allows user to retry or modify
+- **AND** system includes structured error information (error_code, error_type, affected_resources, dependencies) in error response
+- **AND** system provides tool execution summary highlighting recent state changes that may affect retry decisions
+
+#### Scenario: LLM receives structured error information
+- **WHEN** query execution fails
+- **THEN** LLM receives error response with structured fields (error_code, error_type, affected_resources, dependencies, suggested_actions)
+- **AND** LLM can analyze error structure to understand failure cause and retry feasibility
+
+#### Scenario: LLM receives tool execution summary
+- **WHEN** LLM processes user query after tool execution failures
+- **THEN** LLM receives summary of recent tool executions highlighting successes, failures, and state changes
+- **AND** LLM can identify when dependencies have been resolved and retry is appropriate
+
+#### Scenario: LLM makes intelligent retry decisions
+- **WHEN** LLM receives error indicating dependency issue (e.g., foreign key constraint)
+- **AND** tool execution summary shows dependency has been resolved (e.g., dependent table deleted)
+- **THEN** LLM automatically retries the failed operation without requiring explicit user intervention
 
 ### Requirement: SQL mode interface
 The system SHALL provide an interactive interface for SQL queries with prompt, command handling, and tab completion support.

@@ -21,7 +21,7 @@ func NewHTTPTool() *HTTPTool {
 
 // HTTPRequestParams represents parameters for HTTP request
 type HTTPRequestParams struct {
-	Method  string            `json:"method"`  // GET, POST, PUT, DELETE
+	Method  string            `json:"method"` // GET, POST, PUT, DELETE
 	URL     string            `json:"url"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Body    string            `json:"body,omitempty"`
@@ -162,6 +162,21 @@ func (t *HTTPTool) GetDefinition() map[string]interface{} {
 					"timeout": map[string]interface{}{
 						"type":        "integer",
 						"description": "Timeout in seconds (default: 30)",
+					},
+					"risk_level": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"low", "medium", "high"},
+						"description": "Optional: Risk level assessment for this operation. 'low' = safe to execute automatically (e.g., GET, HEAD), 'medium'/'high' = requires user confirmation (e.g., POST, DELETE). If not provided, system will assess risk conservatively.",
+					},
+					"task_type": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"definitive", "exploratory"},
+						"description": "Optional: Task type classification. 'definitive' = task is clear and complete, 'exploratory' = task requires information gathering or multi-step process. If not provided, system will infer from context.",
+					},
+					"output_mode": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"full", "streaming"},
+						"description": "Optional: Output display mode. 'full' = display all results to user (for definitive tasks), 'streaming' = real-time streaming with truncation (for exploratory tasks). If not provided, inferred from task_type.",
 					},
 				},
 				"required": []string{"url"},

@@ -58,11 +58,11 @@ type FileExistsParams struct {
 
 // FileResult represents file operation result
 type FileResult struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	Content string `json:"content,omitempty"`
+	Success bool     `json:"success"`
+	Message string   `json:"message,omitempty"`
+	Content string   `json:"content,omitempty"`
 	Files   []string `json:"files,omitempty"`
-	Exists  bool   `json:"exists,omitempty"`
+	Exists  bool     `json:"exists,omitempty"`
 }
 
 // validatePath checks if a path is within allowed directories
@@ -281,6 +281,21 @@ func (t *FileTool) GetDefinition() map[string]interface{} {
 					"content": map[string]interface{}{
 						"type":        "string",
 						"description": "Content to write (for write operation)",
+					},
+					"risk_level": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"low", "medium", "high"},
+						"description": "Optional: Risk level assessment for this operation. 'low' = safe to execute automatically (e.g., read, list, exists), 'medium'/'high' = requires user confirmation (e.g., write). If not provided, system will assess risk conservatively.",
+					},
+					"task_type": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"definitive", "exploratory"},
+						"description": "Optional: Task type classification. 'definitive' = task is clear and complete, 'exploratory' = task requires information gathering or multi-step process. If not provided, system will infer from context.",
+					},
+					"output_mode": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"full", "streaming"},
+						"description": "Optional: Output display mode. 'full' = display all results to user (for definitive tasks), 'streaming' = real-time streaming with truncation (for exploratory tasks). If not provided, inferred from task_type.",
 					},
 				},
 				"required": []string{"operation", "path"},

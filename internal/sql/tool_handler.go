@@ -203,18 +203,37 @@ func (h *ToolHandler) ExecuteTool(ctx context.Context, toolCall llm.ToolCall) (j
 		// Execute SQL - this does NOT print anything, only returns data
 		result, err := tool.ExecuteSQL(ctx, h.conn, sql)
 		if err != nil {
-			// Properly encode error message as JSON
-			// Include hint that LLM can check Skills for guidance and retry
+			// Extract structured error information
+			errorInfo := tool.ExtractErrorInfo(err)
 			errorMessage := err.Error()
+
+			// Build structured error JSON with backward compatibility
 			errorJSON := map[string]interface{}{
 				"status": "error",
-				"error":  errorMessage,
-				"hint":   "Check available Skills for correct syntax or required parameters. You may retry with corrections (max 2 attempts).",
+				"error":  errorMessage, // Keep original error message for backward compatibility
 			}
+
+			// Add structured error fields if available
+			if errorInfo.ErrorCode != "" {
+				errorJSON["error_code"] = errorInfo.ErrorCode
+			}
+			if errorInfo.ErrorType != "" && errorInfo.ErrorType != "unknown" {
+				errorJSON["error_type"] = errorInfo.ErrorType
+			}
+			if len(errorInfo.AffectedResources) > 0 {
+				errorJSON["affected_resources"] = errorInfo.AffectedResources
+			}
+			if len(errorInfo.Dependencies) > 0 {
+				errorJSON["dependencies"] = errorInfo.Dependencies
+			}
+			if len(errorInfo.SuggestedActions) > 0 {
+				errorJSON["suggested_actions"] = errorInfo.SuggestedActions
+			}
+
 			jsonData, jsonErr := json.Marshal(errorJSON)
 			if jsonErr != nil {
 				// Fallback if JSON encoding fails
-				errorMsg := fmt.Sprintf(`{"status":"error","error":"%s","hint":"Check available Skills for guidance and retry (max 2 attempts)"}`, strings.ReplaceAll(errorMessage, `"`, `\"`))
+				errorMsg := fmt.Sprintf(`{"status":"error","error":"%s"}`, strings.ReplaceAll(errorMessage, `"`, `\"`))
 				return json.RawMessage(errorMsg), nil
 			}
 			return json.RawMessage(jsonData), nil
@@ -229,17 +248,12 @@ func (h *ToolHandler) ExecuteTool(ctx context.Context, toolCall llm.ToolCall) (j
 			"row_count": len(result.Rows),
 		}
 
-		// For DDL/DML operations (no data returned), add explicit completion message
+		// For operations with no data returned, add completion message
+		// Let LLM decide whether task is complete based on task type (definitive vs exploratory)
 		if len(result.Rows) == 0 {
-			sqlUpper := strings.ToUpper(strings.TrimSpace(sql))
-			isDDL := strings.HasPrefix(sqlUpper, "CREATE") || strings.HasPrefix(sqlUpper, "ALTER") ||
-				strings.HasPrefix(sqlUpper, "DROP") || strings.HasPrefix(sqlUpper, "INSERT") ||
-				strings.HasPrefix(sqlUpper, "UPDATE") || strings.HasPrefix(sqlUpper, "DELETE") ||
-				strings.HasPrefix(sqlUpper, "CALL") || strings.HasPrefix(sqlUpper, "TRUNCATE")
-
-			if isDDL {
-				resultJSON["message"] = "SQL executed successfully. Task completed."
-			}
+			resultJSON["status"] = "success"
+			// Don't add specific instruction - let LLM decide based on task context
+			// LLM will determine if this is definitive (complete) or exploratory (needs continuation)
 		}
 
 		jsonData, err := json.Marshal(resultJSON)
@@ -362,12 +376,33 @@ func (h *ToolHandler) ExecuteTool(ctx context.Context, toolCall llm.ToolCall) (j
 			if strings.Contains(err.Error(), "unknown built-in tool") {
 				return nil, fmt.Errorf("unknown tool: %s", toolName)
 			}
-			// For execution errors, encode as JSON similar to execute_sql errors
+			// For execution errors, extract structured error information
+			errorInfo := tool.ExtractErrorInfo(err)
 			errorMessage := err.Error()
+
+			// Build structured error JSON with backward compatibility
 			errorJSON := map[string]interface{}{
 				"status": "error",
-				"error":  errorMessage,
+				"error":  errorMessage, // Keep original error message for backward compatibility
 			}
+
+			// Add structured error fields if available
+			if errorInfo.ErrorCode != "" {
+				errorJSON["error_code"] = errorInfo.ErrorCode
+			}
+			if errorInfo.ErrorType != "" && errorInfo.ErrorType != "unknown" {
+				errorJSON["error_type"] = errorInfo.ErrorType
+			}
+			if len(errorInfo.AffectedResources) > 0 {
+				errorJSON["affected_resources"] = errorInfo.AffectedResources
+			}
+			if len(errorInfo.Dependencies) > 0 {
+				errorJSON["dependencies"] = errorInfo.Dependencies
+			}
+			if len(errorInfo.SuggestedActions) > 0 {
+				errorJSON["suggested_actions"] = errorInfo.SuggestedActions
+			}
+
 			jsonData, jsonErr := json.Marshal(errorJSON)
 			if jsonErr != nil {
 				// Fallback if JSON encoding fails
@@ -447,9 +482,11 @@ func (h *ToolHandler) ExecuteTool(ctx context.Context, toolCall llm.ToolCall) (j
 }
 
 // HandleToolCallLoop handles the complete tool calling loop
-// Returns the final response content and any query result
+// Returns the final response content, any query result, and complete messages array for session persistence
 // If schemaContext is empty, runs in free mode (no database connection)
-func (h *ToolHandler) HandleToolCallLoop(ctx context.Context, llmClient *llm.Client, userInput string, schemaContext string, databaseType string, conversationHistory []llm.ChatMessage, tools []llm.Function) (string, *db.QueryResult, error) {
+// If rawMessages is provided, it will be used directly (includes tool calls and results from previous sessions)
+// Otherwise, conversationHistory will be converted to messages
+func (h *ToolHandler) HandleToolCallLoop(ctx context.Context, llmClient *llm.Client, userInput string, schemaContext string, databaseType string, conversationHistory []llm.ChatMessage, tools []llm.Function, rawMessages []interface{}) (string, *db.QueryResult, []interface{}, error) {
 	// Determine mode: free mode or database mode
 	isFreeMode := schemaContext == "" || h.conn == nil
 
@@ -509,10 +546,11 @@ You are a helpful AI assistant for database queries and related tasks.
 - If a request is not a database query, use the appropriate non-SQL tools.
 - **CRITICAL**: Before generating new SQL queries, check conversation history for recent query results. If the user requests visualization (chart/table) and recent query results are available, use render_chart or render_table with the existing data instead of generating new SQL.
 - Only generate new SQL queries if the user explicitly requests different data or if no recent query results are available.
+- **MANDATORY**: When user requests database operations, you MUST call execute_sql tool. Do NOT describe what you will do in text - actually call the tool. Do NOT say "I will execute" or "Stand by while I execute" - just call the tool directly.
 </POLICY>
 
 <TOOLS>
-- execute_sql: Execute SQL queries against the database.
+- execute_sql: **MANDATORY TOOL CALL**: Execute SQL queries against the database. When user requests database operations (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, SHOW, etc.), you MUST call this tool. Do NOT describe actions in text - call the tool directly.
 - render_table: Format query results as a table. **PRIORITY**: Check conversation history for recent query results first.
 - render_chart: **MANDATORY**: When user requests chart visualization, you MUST call this tool. Do NOT return text descriptions or JSON. Check conversation history for recent query results first.
 - execute_command: System operations (install, setup, configuration). Not for database queries.
@@ -621,87 +659,206 @@ You are a helpful AI assistant for database queries and related tasks.
 	}
 
 	// Build initial messages
+	// systemPrompt is already a string (BuildSystemPrompt returns string)
+	// Convert to map[string]interface{} to ensure proper serialization
 	messages := []interface{}{
-		llm.ChatMessage{
-			Role:    "system",
-			Content: systemPrompt,
+		map[string]interface{}{
+			"role":    "system",
+			"content": systemPrompt, // Ensure content is string
 		},
 	}
 
-	// Add conversation history
-	for _, msg := range conversationHistory {
-		messages = append(messages, msg)
+	// Use rawMessages if provided (includes tool calls and results from previous sessions)
+	// Otherwise, convert conversationHistory to messages
+	if rawMessages != nil && len(rawMessages) > 0 {
+		// Skip system message if it exists in rawMessages (we'll use the new one)
+		// Also normalize message format to ensure compatibility with LLM API
+		for _, msg := range rawMessages {
+			// Skip system messages (we'll use the new one)
+			if msgMap, ok := msg.(map[string]interface{}); ok {
+				if role, ok := msgMap["role"].(string); ok && role == "system" {
+					continue // Skip old system message
+				}
+				// Content field is already normalized in mode.go when loading from Session
+				messages = append(messages, msgMap)
+			} else if chatMsg, ok := msg.(llm.ChatMessage); ok {
+				if chatMsg.Role == "system" {
+					continue // Skip old system message
+				}
+				// Convert ChatMessage to map to ensure proper serialization
+				messages = append(messages, map[string]interface{}{
+					"role":    chatMsg.Role,
+					"content": chatMsg.Content, // Ensure content is string
+				})
+			}
+		}
+	} else {
+		// Add conversation history (legacy format)
+		// Convert ChatMessage to map to ensure proper serialization
+		for _, msg := range conversationHistory {
+			messages = append(messages, map[string]interface{}{
+				"role":    msg.Role,
+				"content": msg.Content, // Ensure content is string
+			})
+		}
 	}
 
 	// Add user input
-	messages = append(messages, llm.ChatMessage{
-		Role:    "user",
-		Content: userInput,
+	// Convert to map[string]interface{} to ensure proper serialization
+	messages = append(messages, map[string]interface{}{
+		"role":    "user",
+		"content": userInput, // Ensure content is string
 	})
 
 	var lastQueryResult *db.QueryResult
-	var lastFormattedOutput string
-	maxIterations := 10 // Prevent infinite loops
+	var hasSuccessfulToolExecution bool // Track if any tool executed successfully in this request
+	maxIterations := 10                 // Prevent infinite loops
 
 	for i := 0; i < maxIterations; i++ {
+		// Messages array already contains full conversation history including tool calls and results
+		// If messages are too long, compression logic will handle it
+
 		// Call LLM - show "Thinking..." while LLM is processing
 		stopThinking := ui.ShowLoading("Thinking...")
 		response, err := llmClient.ChatWithTools(ctx, messages, tools)
 		stopThinking()
 		if err != nil {
-			return "", nil, fmt.Errorf("LLM call failed: %w", err)
+			return "", nil, nil, fmt.Errorf("LLM call failed: %w", err)
 		}
 
 		if len(response.Choices) == 0 {
-			return "", nil, fmt.Errorf("no choices in response")
+			return "", nil, nil, fmt.Errorf("no choices in response")
 		}
 
 		choice := response.Choices[0]
 		message := choice.Message
+		finishReason := choice.FinishReason
 
 		// Add assistant message to history
 		// If there are tool_calls, content might be empty or null
 		assistantMsg := map[string]interface{}{
 			"role": "assistant",
 		}
-		// Only add content if it's not empty
+		// Always add content field (empty string if no content) to ensure proper serialization
+		// LLM API requires content to be string or not present, not null
 		if message.Content != "" {
 			assistantMsg["content"] = message.Content
+		} else {
+			// Set empty string instead of omitting (ensures it's a string type)
+			assistantMsg["content"] = ""
 		}
 		if len(message.ToolCalls) > 0 {
 			assistantMsg["tool_calls"] = message.ToolCalls
 		}
 		messages = append(messages, assistantMsg)
 
-		// If no tool calls, return the final response
+		// If no tool calls, this is LLM's final response
 		if len(message.ToolCalls) == 0 {
-			if message.Content == "" {
-				if lastFormattedOutput != "" {
-					return lastFormattedOutput, lastQueryResult, nil
+			// Check finish_reason: "stop" means LLM decided to finish (no more tool calls needed)
+			// If finish_reason is "stop", exit immediately regardless of content
+			if finishReason == "stop" {
+				// LLM explicitly finished - exit immediately
+				if message.Content == "" {
+					// Empty content is acceptable if tools executed successfully
+					if hasSuccessfulToolExecution {
+						return "", lastQueryResult, messages, nil
+					}
+					// No tools executed and empty content - error
+					return "", lastQueryResult, messages, fmt.Errorf("empty response from LLM")
 				}
-				return "", lastQueryResult, fmt.Errorf("empty response from LLM")
+				return message.Content, lastQueryResult, messages, nil
 			}
-			return message.Content, lastQueryResult, nil
+
+			// Case 1: LLM returned text content - use it as final response
+			if message.Content != "" {
+				// Check if user requested database operations but LLM returned text without calling tools
+				// This is likely LLM hallucination - reject it and ask LLM to call tools
+				userInputUpper := strings.ToUpper(userInput)
+				isDBOperationRequest := strings.Contains(userInputUpper, "DROP") ||
+					strings.Contains(userInputUpper, "CREATE") ||
+					strings.Contains(userInputUpper, "DELETE") ||
+					strings.Contains(userInputUpper, "INSERT") ||
+					strings.Contains(userInputUpper, "UPDATE") ||
+					strings.Contains(userInputUpper, "SELECT") ||
+					strings.Contains(userInputUpper, "SHOW") ||
+					strings.Contains(userInputUpper, "ALTER")
+
+				// If user requested DB operation but LLM returned text without tool calls,
+				// add error message and continue loop to force LLM to call tools
+				// Check in all iterations, not just first one
+				if isDBOperationRequest && !hasSuccessfulToolExecution {
+					errorMsg := map[string]interface{}{
+						"role":    "system",
+						"content": "ERROR: You returned text describing database operations, but you MUST call execute_sql tool to actually execute them. Do NOT describe what you will do or claim success without actually calling the tool. The user requested database operations, so you must use execute_sql tool. Do NOT say operations succeeded unless you actually called execute_sql and received success status.",
+					}
+					messages = append(messages, errorMsg)
+					continue // Force LLM to retry with tool calls
+				}
+
+				// If LLM claims success but no tools were executed, reject it
+				// Check if content contains success indicators but no tools were executed
+				contentUpper := strings.ToUpper(message.Content)
+				claimsSuccess := strings.Contains(contentUpper, "SUCCESS") ||
+					strings.Contains(contentUpper, "SUCCESSFULLY") ||
+					strings.Contains(contentUpper, "COMPLETED") ||
+					strings.Contains(contentUpper, "DONE")
+
+				if claimsSuccess && !hasSuccessfulToolExecution && isDBOperationRequest {
+					errorMsg := map[string]interface{}{
+						"role":    "system",
+						"content": "ERROR: You claimed the operation succeeded, but you did not actually call execute_sql tool. You MUST call execute_sql tool to execute database operations. Do NOT claim success without actually executing the operation.",
+					}
+					messages = append(messages, errorMsg)
+					continue // Force LLM to retry with tool calls
+				}
+
+				// For non-DB operations or after tool execution, return LLM's text response
+				return message.Content, lastQueryResult, messages, nil
+			}
+
+			// Case 2: LLM returned empty content
+			// This is acceptable if tools executed successfully (results already displayed)
+			// Return empty string - let mode.go generate appropriate response based on queryResult
+			if hasSuccessfulToolExecution {
+				// Tools executed successfully, empty response is normal (results already displayed)
+				return "", lastQueryResult, messages, nil
+			}
+
+			// Case 3: No tools executed and LLM returned empty - this is an error
+			// But only if this is the first iteration (user's initial request)
+			if i == 0 {
+				return "", nil, messages, fmt.Errorf("empty response from LLM")
+			}
+
+			// Subsequent iterations with empty response after no tool execution - also error
+			return "", lastQueryResult, messages, fmt.Errorf("empty response from LLM")
 		}
 
-		// Execute tool calls (show status only)
+		// Execute tool calls
 		for _, toolCall := range message.ToolCalls {
-			// For execute_sql, show SQL and ask for confirmation before executing
-			if toolCall.Function.Name == "execute_sql" {
-				args, err := toolCall.ParseArguments()
-				if err != nil {
-					ui.ShowError(fmt.Sprintf("Tool [%s] failed: %v", toolCall.Function.Name, err))
-					errorMsg := fmt.Sprintf(`{"error": "%s"}`, err.Error())
-					toolResult := json.RawMessage(errorMsg)
-					toolMsg := map[string]interface{}{
-						"role":         "tool",
-						"content":      string(toolResult),
-						"tool_call_id": toolCall.ID,
-					}
-					messages = append(messages, toolMsg)
-					continue
+			// Parse arguments for risk assessment
+			args, parseErr := toolCall.ParseArguments()
+			if parseErr != nil {
+				ui.ShowError(fmt.Sprintf("Tool [%s] failed: %v", toolCall.Function.Name, parseErr))
+				errorMsg := fmt.Sprintf(`{"error": "%s"}`, parseErr.Error())
+				toolResult := json.RawMessage(errorMsg)
+				toolMsg := map[string]interface{}{
+					"role":         "tool",
+					"content":      string(toolResult),
+					"tool_call_id": toolCall.ID,
 				}
+				messages = append(messages, toolMsg)
+				continue
+			}
 
+			// Assess risk for tool execution
+			riskAssessor := tool.GetRiskAssessor(toolCall.Function.Name)
+			riskLevel := riskAssessor.AssessRisk(toolCall.Function.Name, args)
+			// Log risk assessment result (written to ~/.aiq/logs/risk_assessment.log)
+			tool.LogRiskAssessment("Tool: %s, RiskLevel: %v", toolCall.Function.Name, riskLevel)
+
+			// For execute_sql, handle confirmation based on risk level
+			if toolCall.Function.Name == "execute_sql" {
 				sql, ok := args["sql"].(string)
 				if !ok {
 					err := fmt.Errorf("invalid sql parameter")
@@ -717,36 +874,99 @@ You are a helpful AI assistant for database queries and related tasks.
 					continue
 				}
 
-				fmt.Println()
-				ui.ShowInfo("Generated SQL:")
-				fmt.Println(ui.HighlightSQL(sql))
-				fmt.Println()
-
-				confirm, err := ui.ShowConfirm("Execute this query?")
-				if err != nil {
+				// Only show SQL and ask for confirmation if high-risk
+				if riskLevel == tool.RiskHigh {
 					fmt.Println()
-					// Treat as cancelled
-					ui.ShowWarning("Query execution cancelled.")
-					toolResult := json.RawMessage(`{"status":"cancelled","message":"query execution cancelled by user"}`)
-					toolMsg := map[string]interface{}{
-						"role":         "tool",
-						"content":      string(toolResult),
-						"tool_call_id": toolCall.ID,
+					ui.ShowInfo("Generated SQL:")
+					fmt.Println(ui.HighlightSQL(sql))
+					fmt.Println()
+
+					confirm, err := ui.ShowConfirm("Execute this query?")
+					if err != nil {
+						fmt.Println()
+						// Treat as cancelled
+						ui.ShowWarning("Query execution cancelled.")
+						toolResult := json.RawMessage(`{"status":"cancelled","message":"query execution cancelled by user"}`)
+						toolMsg := map[string]interface{}{
+							"role":         "tool",
+							"content":      string(toolResult),
+							"tool_call_id": toolCall.ID,
+						}
+						messages = append(messages, toolMsg)
+						continue
 					}
-					messages = append(messages, toolMsg)
-					continue
-				}
-				if !confirm {
-					ui.ShowWarning("Query execution cancelled.")
-					toolResult := json.RawMessage(`{"status":"cancelled","message":"query execution cancelled by user"}`)
-					toolMsg := map[string]interface{}{
-						"role":         "tool",
-						"content":      string(toolResult),
-						"tool_call_id": toolCall.ID,
+					if !confirm {
+						ui.ShowWarning("Query execution cancelled.")
+						toolResult := json.RawMessage(`{"status":"cancelled","message":"query execution cancelled by user"}`)
+						toolMsg := map[string]interface{}{
+							"role":         "tool",
+							"content":      string(toolResult),
+							"tool_call_id": toolCall.ID,
+						}
+						messages = append(messages, toolMsg)
+						continue
 					}
-					messages = append(messages, toolMsg)
-					continue
 				}
+				// For low-risk SQL, execute automatically without confirmation
+			}
+
+			// For other tools (execute_command, file_operations, http_request), handle confirmation based on risk level
+			if toolCall.Function.Name == "execute_command" || toolCall.Function.Name == "file_operations" || toolCall.Function.Name == "http_request" {
+				if riskLevel == tool.RiskHigh {
+					// Show tool call details and ask for confirmation
+					toolCallDisplay := h.formatToolCall(toolCall)
+					fmt.Println()
+					ui.ShowInfo("Tool call:")
+					fmt.Println(toolCallDisplay)
+					fmt.Println()
+
+					confirm, err := ui.ShowConfirm("Execute this operation?")
+					if err != nil {
+						fmt.Println()
+						ui.ShowWarning("Operation cancelled.")
+						toolResult := json.RawMessage(`{"status":"cancelled","message":"operation cancelled by user"}`)
+						toolMsg := map[string]interface{}{
+							"role":         "tool",
+							"content":      string(toolResult),
+							"tool_call_id": toolCall.ID,
+						}
+						messages = append(messages, toolMsg)
+						continue
+					}
+					if !confirm {
+						ui.ShowWarning("Operation cancelled.")
+						toolResult := json.RawMessage(`{"status":"cancelled","message":"operation cancelled by user"}`)
+						toolMsg := map[string]interface{}{
+							"role":         "tool",
+							"content":      string(toolResult),
+							"tool_call_id": toolCall.ID,
+						}
+						messages = append(messages, toolMsg)
+						continue
+					}
+				}
+				// For low-risk operations, execute automatically without confirmation
+			}
+
+			// Extract output_mode from tool call arguments (before execution)
+			outputMode := ""
+			if outputModeStr, ok := args["output_mode"].(string); ok {
+				outputMode = strings.ToLower(outputModeStr)
+			}
+			// Infer output_mode from task_type if not provided
+			if outputMode == "" {
+				if taskTypeStr, ok := args["task_type"].(string); ok {
+					taskType := strings.ToLower(taskTypeStr)
+					if taskType == "definitive" {
+						outputMode = "full"
+					} else if taskType == "exploratory" {
+						outputMode = "streaming"
+					}
+				}
+			}
+			// Default: streaming (conservative for long-running processes)
+			if outputMode == "" {
+				outputMode = "streaming"
 			}
 
 			// Format and display tool call with arguments
@@ -755,77 +975,123 @@ You are a helpful AI assistant for database queries and related tasks.
 			var toolResult json.RawMessage
 			var err error
 
-			// Special handling for execute_command: track time and streaming output
+			// Special handling for execute_command: track time and output based on output_mode
 			if toolCall.Function.Name == "execute_command" {
 				// Display tool call with loading icon (normal color for main command)
 				fmt.Println("⏳ " + toolCallDisplay)
 				startTime = time.Now()
 
-				// Create rolling output for real-time display
-				rollingOutput := ui.NewRollingOutput(3)
-
-				// Parse arguments
-				args, parseErr := toolCall.ParseArguments()
+				// Use already parsed args (from risk assessment above)
+				// args and parseErr are already available from above
 				if parseErr != nil {
 					err = parseErr
 					toolResult = nil
 				} else {
-					// Execute with callback for streaming output - rolling window display
-					result, execErr := builtin.ExecuteBuiltinToolWithCallback(ctx, "execute_command", args, h.conn, func(line string) {
-						// AddLine handles the rolling display (clears old lines, prints new ones)
-						rollingOutput.AddLine(line)
-					})
+					if outputMode == "full" {
+						// Full output mode: display all output without truncation
+						result, execErr := builtin.ExecuteBuiltinToolWithCallback(ctx, "execute_command", args, h.conn, func(line string) {
+							// Print each line immediately (full output)
+							fmt.Println(line)
+						})
 
-					// Show summary after command completes
-					rollingOutput.Finish()
-
-					if execErr != nil {
-						err = execErr
-						toolResult = nil
-					} else {
-						// Convert result to JSON
-						jsonBytes, marshalErr := json.Marshal(result)
-						if marshalErr != nil {
-							err = fmt.Errorf("failed to marshal result: %w", marshalErr)
+						if execErr != nil {
+							err = execErr
 							toolResult = nil
 						} else {
-							// Process result for LLM (truncation, status, etc.)
-							var resultMap map[string]interface{}
-							if unmarshalErr := json.Unmarshal(jsonBytes, &resultMap); unmarshalErr == nil {
-								exitCode := 0
-								if ec, ok := resultMap["exit_code"].(float64); ok {
-									exitCode = int(ec)
-								} else if ec, ok := resultMap["exit_code"].(int); ok {
-									exitCode = ec
+							// Convert result to JSON (full output already displayed)
+							jsonBytes, marshalErr := json.Marshal(result)
+							if marshalErr != nil {
+								err = fmt.Errorf("failed to marshal result: %w", marshalErr)
+								toolResult = nil
+							} else {
+								// Process result for LLM (full output, no truncation)
+								var resultMap map[string]interface{}
+								if unmarshalErr := json.Unmarshal(jsonBytes, &resultMap); unmarshalErr == nil {
+									exitCode := 0
+									if ec, ok := resultMap["exit_code"].(float64); ok {
+										exitCode = int(ec)
+									} else if ec, ok := resultMap["exit_code"].(int); ok {
+										exitCode = ec
+									}
+
+									// Add status
+									if exitCode == 0 {
+										resultMap["status"] = "success"
+									} else {
+										resultMap["status"] = "error"
+										resultMap["error"] = fmt.Sprintf("Command exited with code %d", exitCode)
+									}
+
+									// Remove truncation fields (not used in full mode)
+									delete(resultMap, "truncated_stdout")
+									delete(resultMap, "truncated_stderr")
+
+									jsonData, _ := json.Marshal(resultMap)
+									toolResult = json.RawMessage(jsonData)
 								}
+							}
+						}
+					} else {
+						// Streaming output mode: rolling window display
+						rollingOutput := ui.NewRollingOutput(3)
 
-								// Save full output for display
-								fullStdout, _ := resultMap["stdout"].(string)
-								fullStderr, _ := resultMap["stderr"].(string)
+						// Execute with callback for streaming output - rolling window display
+						result, execErr := builtin.ExecuteBuiltinToolWithCallback(ctx, "execute_command", args, h.conn, func(line string) {
+							// AddLine handles the rolling display (clears old lines, prints new ones)
+							rollingOutput.AddLine(line)
+						})
 
-								// Use truncated output for LLM
-								if truncatedStdout, ok := resultMap["truncated_stdout"].(string); ok && truncatedStdout != "" {
-									resultMap["_full_stdout"] = fullStdout
-									resultMap["stdout"] = truncatedStdout
+						// Show summary after command completes
+						rollingOutput.Finish()
+
+						if execErr != nil {
+							err = execErr
+							toolResult = nil
+						} else {
+							// Convert result to JSON
+							jsonBytes, marshalErr := json.Marshal(result)
+							if marshalErr != nil {
+								err = fmt.Errorf("failed to marshal result: %w", marshalErr)
+								toolResult = nil
+							} else {
+								// Process result for LLM (truncation, status, etc.)
+								var resultMap map[string]interface{}
+								if unmarshalErr := json.Unmarshal(jsonBytes, &resultMap); unmarshalErr == nil {
+									exitCode := 0
+									if ec, ok := resultMap["exit_code"].(float64); ok {
+										exitCode = int(ec)
+									} else if ec, ok := resultMap["exit_code"].(int); ok {
+										exitCode = ec
+									}
+
+									// Save full output for display
+									fullStdout, _ := resultMap["stdout"].(string)
+									fullStderr, _ := resultMap["stderr"].(string)
+
+									// Use truncated output for LLM
+									if truncatedStdout, ok := resultMap["truncated_stdout"].(string); ok && truncatedStdout != "" {
+										resultMap["_full_stdout"] = fullStdout
+										resultMap["stdout"] = truncatedStdout
+									}
+									if truncatedStderr, ok := resultMap["truncated_stderr"].(string); ok && truncatedStderr != "" {
+										resultMap["_full_stderr"] = fullStderr
+										resultMap["stderr"] = truncatedStderr
+									}
+
+									delete(resultMap, "truncated_stdout")
+									delete(resultMap, "truncated_stderr")
+
+									// Add status
+									if exitCode == 0 {
+										resultMap["status"] = "success"
+									} else {
+										resultMap["status"] = "error"
+										resultMap["error"] = fmt.Sprintf("Command exited with code %d", exitCode)
+									}
+
+									jsonData, _ := json.Marshal(resultMap)
+									toolResult = json.RawMessage(jsonData)
 								}
-								if truncatedStderr, ok := resultMap["truncated_stderr"].(string); ok && truncatedStderr != "" {
-									resultMap["_full_stderr"] = fullStderr
-									resultMap["stderr"] = truncatedStderr
-								}
-
-								delete(resultMap, "truncated_stdout")
-								delete(resultMap, "truncated_stderr")
-
-								// Add status
-								if exitCode == 0 {
-									resultMap["status"] = "success"
-								} else {
-									resultMap["status"] = "error"
-									resultMap["error"] = fmt.Sprintf("Command exited with code %d", exitCode)
-								}
-
-								jsonData, _ := json.Marshal(resultMap)
-								toolResult = json.RawMessage(jsonData)
 							}
 						}
 					}
@@ -919,7 +1185,7 @@ You are a helpful AI assistant for database queries and related tasks.
 							"displayed":   true,
 							"chart_type":  chartType,
 							"row_count":   rowCount,
-							"instruction": "Chart already displayed to user. Do NOT repeat or describe the chart. Just confirm completion or ask if user needs anything else.",
+							"instruction": "Chart already displayed to user. Task completed. Return finish_reason='stop' with no content and no tool_calls to finish.",
 						}
 						simplifiedJSON, _ := json.Marshal(simplifiedResult)
 						toolResult = json.RawMessage(simplifiedJSON)
@@ -965,17 +1231,13 @@ You are a helpful AI assistant for database queries and related tasks.
 								fmt.Printf("%d row(s) in set\n", len(rowsData))
 							}
 
-							// Format result summary for conversation history
-							resultSummary := formatQueryResultSummary(queryResult)
-
-							// Simplify result for LLM - include summary for conversation history
-							// The summary will be included in LLM's response and added to conversation history
+							// Simplify result for LLM - results are already displayed to user
+							// Tell LLM to return minimal response (no content) since results are already shown
 							simplifiedResult := map[string]interface{}{
-								"status":         "success",
-								"row_count":      len(rowsData),
-								"displayed":      true,
-								"result_summary": resultSummary,
-								"instruction":    "Results already displayed to user in table format. Do NOT list, repeat, or summarize the data. Just confirm completion or ask if user needs anything else.",
+								"status":      "success",
+								"row_count":   len(rowsData),
+								"displayed":   true,
+								"instruction": "CRITICAL: Results are already displayed to the user in table format. Do NOT repeat the results in your response. Return finish_reason='stop' with empty content (no text output). The user can see the results above.",
 							}
 							simplifiedJSON, _ := json.Marshal(simplifiedResult)
 							toolResult = json.RawMessage(simplifiedJSON)
@@ -984,27 +1246,36 @@ You are a helpful AI assistant for database queries and related tasks.
 				}
 			}
 
-			// Store last formatted output if tool returned it
+			// Track execution status
 			if err == nil {
-				var outputData map[string]interface{}
-				if jsonErr := json.Unmarshal(toolResult, &outputData); jsonErr == nil {
-					if output, ok := outputData["output"].(string); ok && output != "" {
-						lastFormattedOutput = output
+				var resultData map[string]interface{}
+				if json.Unmarshal(toolResult, &resultData) == nil {
+					if status, ok := resultData["status"].(string); ok && status == "success" {
+						hasSuccessfulToolExecution = true
 					}
 				}
 			}
 
-			// Step 5: Add tool result message back to LLM
-			// LLM will decide next step based on tool results
+			// Always return tool result to LLM for decision-making
+			// LLM will decide based on task_type and execution status:
+			// - task_type="definitive" + all succeeded → return finish_reason="stop" with minimal output
+			// - task_type="definitive" + any failed → analyze errors and retry/alternative
+			// - task_type="exploratory" + any result → plan next steps
 			toolMsg := map[string]interface{}{
 				"role":         "tool",
-				"content":      string(toolResult), // Convert json.RawMessage to string
+				"content":      string(toolResult),
 				"tool_call_id": toolCall.ID,
 			}
 			messages = append(messages, toolMsg)
 		}
-		// Loop continues: LLM will process tool results and decide next action
+
+		// After processing all tool calls, continue loop to let LLM process results
+		// LLM will decide next action based on task_type and execution status:
+		// - task_type="definitive" + all succeeded → return finish_reason="stop" with minimal output
+		// - task_type="definitive" + any failed → analyze errors and retry/alternative
+		// - task_type="exploratory" + any result → plan next steps
+		// Note: We always continue the loop here - LLM will decide whether to continue or finish
 	}
 
-	return "", nil, fmt.Errorf("max iterations reached")
+	return "", nil, nil, fmt.Errorf("max iterations reached")
 }

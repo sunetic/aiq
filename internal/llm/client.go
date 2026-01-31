@@ -345,10 +345,53 @@ func (c *Client) ChatWithTools(ctx context.Context, messages []interface{}, tool
 		}
 	}
 
+	// Normalize messages to ensure content field is always a string (not an object)
+	// This is critical for LLM API compatibility
+	// Messages from Session are already normalized in mode.go and tool_handler.go,
+	// but we do a final check here for safety
+	normalizedMessages := make([]interface{}, 0, len(messages))
+	for _, msg := range messages {
+		var msgMap map[string]interface{}
+
+		// Convert to map if needed
+		if m, ok := msg.(map[string]interface{}); ok {
+			msgMap = m
+		} else if chatMsg, ok := msg.(ChatMessage); ok {
+			// Convert ChatMessage struct to map
+			msgMap = map[string]interface{}{
+				"role":    chatMsg.Role,
+				"content": chatMsg.Content,
+			}
+		} else {
+			// Unknown type - try to convert via JSON
+			if jsonBytes, err := json.Marshal(msg); err == nil {
+				if json.Unmarshal(jsonBytes, &msgMap) != nil {
+					continue // Skip if conversion fails
+				}
+			} else {
+				continue // Skip if marshal fails
+			}
+		}
+
+		// Ensure content field is always a string
+		if content, exists := msgMap["content"]; exists && content != nil {
+			if _, isString := content.(string); !isString {
+				// Convert to string
+				if jsonBytes, err := json.Marshal(content); err == nil {
+					msgMap["content"] = string(jsonBytes)
+				} else {
+					msgMap["content"] = fmt.Sprintf("%v", content)
+				}
+			}
+		}
+
+		normalizedMessages = append(normalizedMessages, msgMap)
+	}
+
 	// Create request
 	reqBody := ChatRequest{
 		Model:      c.model,
-		Messages:   messages,
+		Messages:   normalizedMessages,
 		Tools:      toolsArray,
 		ToolChoice: "auto", // Let LLM decide when to use tools
 	}

@@ -2,6 +2,7 @@ package sql
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -84,13 +85,20 @@ func readlineWithHint(rl *readline.Instance, buildPrompt func() string, commands
 	return line, nil
 }
 
-// readMultiLineInput reads multi-line input until completion
-// Supports:
-// - System commands (single line only, immediate execution)
-// - Natural language queries (single line, immediate execution on Enter)
-// - SQL queries (multi-line until semicolon or Ctrl+D)
-// - Pasting multi-line SQL (detected by checking if next line arrives quickly)
-func readMultiLineInput(rl *readline.Instance, buildPrompt func() string, commands []string, descriptions map[string]string) (string, error) {
+// InputMode represents the input mode (single-line or multi-line)
+type InputMode int
+
+const (
+	// InputModeSingleLine means pressing Enter executes immediately
+	InputModeSingleLine InputMode = iota
+	// InputModeMultiLine means pressing Enter continues to next line, empty line or Ctrl+D submits
+	InputModeMultiLine
+)
+
+// readMultiLineInput reads input based on the current input mode
+// - Single-line mode: Press Enter to execute immediately
+// - Multi-line mode: Press Enter to continue, empty line or Ctrl+D to submit
+func readMultiLineInput(rl *readline.Instance, buildPrompt func() string, commands []string, descriptions map[string]string, mode InputMode) (string, error) {
 	// Read first line
 	firstLine, err := readlineWithHint(rl, buildPrompt, commands, descriptions)
 	if err != nil {
@@ -104,61 +112,36 @@ func readMultiLineInput(rl *readline.Instance, buildPrompt func() string, comman
 		return firstLine, nil
 	}
 
-	// Check if first line ends with semicolon (SQL query complete)
-	// If so, return immediately (supports single-line SQL)
-	if strings.HasSuffix(trimmed, ";") {
+	// Single-line mode: execute immediately on Enter
+	if mode == InputModeSingleLine {
 		return firstLine, nil
 	}
 
-	// Check if input contains SQL-like patterns (SELECT, FROM, etc.)
-	// Only enter multi-line mode for SQL queries
-	upperLine := strings.ToUpper(trimmed)
-	isSQLLike := strings.Contains(upperLine, "SELECT") ||
-		strings.Contains(upperLine, "INSERT") ||
-		strings.Contains(upperLine, "UPDATE") ||
-		strings.Contains(upperLine, "DELETE") ||
-		strings.Contains(upperLine, "CREATE") ||
-		strings.Contains(upperLine, "ALTER") ||
-		strings.Contains(upperLine, "DROP") ||
-		strings.Contains(upperLine, "FROM") ||
-		strings.Contains(upperLine, "WHERE") ||
-		strings.Contains(upperLine, "JOIN")
-
-	if isSQLLike {
-		// SQL-like input: continue reading until semicolon or Ctrl+D
-		lines := []string{firstLine}
-		for {
-			// Show continuation prompt
-			fmt.Print(ui.HintText("    -> "))
-			line, err := rl.Readline()
-			if err != nil {
-				if err == readline.ErrInterrupt {
-					// Ctrl+C - cancel multi-line input
-					fmt.Println()
-					return "", readline.ErrInterrupt
-				}
-				// EOF (Ctrl+D) - submit what we have
-				return strings.Join(lines, "\n"), nil
+	// Multi-line mode: continue reading until empty line or Ctrl+D
+	lines := []string{firstLine}
+	for {
+		// Show continuation prompt
+		fmt.Print(ui.HintText("    -> "))
+		line, err := rl.Readline()
+		if err != nil {
+			if err == readline.ErrInterrupt {
+				// Ctrl+C - cancel multi-line input
+				fmt.Println()
+				return "", readline.ErrInterrupt
 			}
-
-			lines = append(lines, line)
-			trimmedLine := strings.TrimSpace(line)
-
-			// If line ends with semicolon, input is complete
-			if strings.HasSuffix(trimmedLine, ";") {
-				return strings.Join(lines, "\n"), nil
-			}
-
-			// If empty line, also submit (allows submitting SQL without semicolon)
-			if trimmedLine == "" {
-				return strings.Join(lines[:len(lines)-1], "\n"), nil
-			}
+			// EOF (Ctrl+D) - submit what we have
+			return strings.Join(lines, "\n"), nil
 		}
-	}
 
-	// Natural language input: single line, execute immediately on Enter
-	// This is the default behavior - user presses Enter and query executes
-	return firstLine, nil
+		trimmedLine := strings.TrimSpace(line)
+
+		// Empty line signals end of multi-line input
+		if trimmedLine == "" {
+			return strings.Join(lines, "\n"), nil
+		}
+
+		lines = append(lines, line)
+	}
 }
 
 // RunSQLMode runs the SQL interactive mode
@@ -382,34 +365,52 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 		}
 	}
 
+	// Input mode: default is single-line mode
+	inputMode := InputModeSingleLine
+
 	// Build dynamic prompt based on source availability and actual database
 	// Use different separators/colors to distinguish source and database
+	// Include mode indicator for multi-line mode
 	var buildPrompt func() string
 	if src != nil {
 		if actualDatabase != "" {
 			buildPrompt = func() string {
+				modeIndicator := ""
+				if inputMode == InputModeMultiLine {
+					modeIndicator = ui.HintText("[multi-line] ")
+				}
 				// Use @ to separate source and database for better distinction
-				return ui.InfoText(fmt.Sprintf("aiq[%s@%s]> ", src.Name, actualDatabase))
+				return modeIndicator + ui.InfoText(fmt.Sprintf("aiq[%s@%s]> ", src.Name, actualDatabase))
 			}
 		} else {
 			buildPrompt = func() string {
-				return ui.InfoText(fmt.Sprintf("aiq[%s]> ", src.Name))
+				modeIndicator := ""
+				if inputMode == InputModeMultiLine {
+					modeIndicator = ui.HintText("[multi-line] ")
+				}
+				return modeIndicator + ui.InfoText(fmt.Sprintf("aiq[%s]> ", src.Name))
 			}
 		}
 	} else {
 		buildPrompt = func() string {
-			return ui.InfoText("aiq> ")
+			modeIndicator := ""
+			if inputMode == InputModeMultiLine {
+				modeIndicator = ui.HintText("[multi-line] ")
+			}
+			return modeIndicator + ui.InfoText("aiq> ")
 		}
 	}
 
 	// Define available commands for hint display
-	commands := []string{"/exit", "/help", "/history", "/clear", "/paste"}
+	commands := []string{"/exit", "/help", "/history", "/clear", "/paste", "/multiline", "/singleline"}
 	commandDescriptions := map[string]string{
-		"/exit":    "Exit chat mode",
-		"/help":    "Show help",
-		"/history": "View history",
-		"/clear":   "Clear history",
-		"/paste":   "Enter paste mode for multi-line SQL",
+		"/exit":       "Exit chat mode",
+		"/help":       "Show help",
+		"/history":    "View history",
+		"/clear":      "Clear history",
+		"/paste":      "Enter paste mode for multi-line SQL",
+		"/multiline":  "Switch to multi-line input mode (Enter continues, empty line submits)",
+		"/singleline": "Switch to single-line input mode (Enter executes immediately)",
 	}
 
 	// Define command completer for Tab completion (only for / commands)
@@ -443,8 +444,8 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 	// For now, prompt is set once at initialization
 
 	for {
-		// Read multi-line input (supports SQL queries and natural language)
-		query, err := readMultiLineInput(rl, buildPrompt, commands, commandDescriptions)
+		// Read input based on current mode
+		query, err := readMultiLineInput(rl, buildPrompt, commands, commandDescriptions, inputMode)
 		if err != nil {
 			if err == readline.ErrInterrupt {
 				// Ctrl+C - continue to next prompt
@@ -504,13 +505,41 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 				fmt.Println()
 				ui.ShowInfo("Available Commands:")
 				fmt.Println()
-				fmt.Println("  /exit     - Exit chat mode and return to main menu")
-				fmt.Println("  /help     - Show this help message")
-				fmt.Println("  /history  - View conversation history")
-				fmt.Println("  /clear    - Clear conversation history")
-				fmt.Println("  /paste    - Enter paste mode for multi-line SQL (press Ctrl+D to finish)")
+				fmt.Println("  /exit       - Exit chat mode and return to main menu")
+				fmt.Println("  /help       - Show this help message")
+				fmt.Println("  /history    - View conversation history")
+				fmt.Println("  /clear      - Clear conversation history")
+				fmt.Println("  /paste      - Enter paste mode for multi-line SQL (press Ctrl+D to finish)")
+				fmt.Println("  /multiline  - Switch to multi-line input mode (Enter continues, empty line submits)")
+				fmt.Println("  /singleline - Switch to single-line input mode (Enter executes immediately)")
+				fmt.Println()
+				modeText := "single-line"
+				if inputMode == InputModeMultiLine {
+					modeText = "multi-line"
+				}
+				fmt.Printf("Current input mode: %s\n", ui.HighlightText(modeText))
 				fmt.Println()
 				fmt.Println("You can also ask questions in natural language to query the database.")
+				fmt.Println()
+				continue
+			}
+
+			// Handle /multiline command - switch to multi-line input mode
+			if strings.ToLower(query) == "/multiline" {
+				inputMode = InputModeMultiLine
+				fmt.Println()
+				ui.ShowInfo("Switched to multi-line input mode.")
+				ui.ShowInfo("Press Enter to continue to next line, empty line or Ctrl+D to submit.")
+				fmt.Println()
+				continue
+			}
+
+			// Handle /singleline command - switch to single-line input mode
+			if strings.ToLower(query) == "/singleline" {
+				inputMode = InputModeSingleLine
+				fmt.Println()
+				ui.ShowInfo("Switched to single-line input mode.")
+				ui.ShowInfo("Press Enter to execute immediately.")
 				fmt.Println()
 				continue
 			}
@@ -652,13 +681,65 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 			continue
 		}
 
-		// Convert existing session messages to LLM chat messages (before adding current query)
+		// Load complete messages array from session (includes tool calls and results)
+		var rawMessages []interface{}
+		if rawMsgs := sess.GetRawMessages(); len(rawMsgs) > 0 {
+			// Convert json.RawMessage to interface{} for use in HandleToolCallLoop
+			rawMessages = make([]interface{}, 0, len(rawMsgs))
+			for _, rawMsg := range rawMsgs {
+				var msg map[string]interface{}
+				if err := json.Unmarshal(rawMsg, &msg); err == nil {
+					// Ensure content field is always a string (not an object) or doesn't exist
+					// This is critical for LLM API compatibility
+					if content, exists := msg["content"]; exists {
+						switch v := content.(type) {
+						case string:
+							// Already a string, keep it (even if empty)
+						case map[string]interface{}, []interface{}:
+							// Content is an object/array, convert to JSON string
+							if jsonBytes, err := json.Marshal(v); err == nil {
+								msg["content"] = string(jsonBytes)
+							} else {
+								// If marshal fails, set to empty string
+								msg["content"] = ""
+							}
+						case nil:
+							// Content is null, remove it (assistant messages with tool_calls may not have content)
+							delete(msg, "content")
+						default:
+							// Convert other types to string
+							msg["content"] = fmt.Sprintf("%v", v)
+						}
+					}
+					// For assistant messages with tool_calls but no content, ensure content is not null
+					if role, ok := msg["role"].(string); ok && role == "assistant" {
+						if _, hasContent := msg["content"]; !hasContent {
+							// Assistant message without content - set to empty string
+							msg["content"] = ""
+						}
+					}
+					rawMessages = append(rawMessages, msg)
+				} else {
+					// If unmarshal fails, try to parse as ChatMessage
+					var chatMsg llm.ChatMessage
+					if err2 := json.Unmarshal(rawMsg, &chatMsg); err2 == nil {
+						rawMessages = append(rawMessages, chatMsg)
+					}
+					// If both fail, skip this message
+				}
+			}
+		}
+
+		// Convert existing session messages to LLM chat messages (for backward compatibility)
+		// Only used if rawMessages is empty
 		conversationHistory := make([]llm.ChatMessage, 0)
-		for _, msg := range sess.GetHistory() {
-			conversationHistory = append(conversationHistory, llm.ChatMessage{
-				Role:    msg.Role,
-				Content: msg.Content,
-			})
+		if len(rawMessages) == 0 {
+			for _, msg := range sess.GetHistory() {
+				conversationHistory = append(conversationHistory, llm.ChatMessage{
+					Role:    msg.Role,
+					Content: msg.Content,
+				})
+			}
 		}
 
 		// Prepare schema context (empty for free mode)
@@ -686,7 +767,7 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 
 		// Use tool calling loop - LLM decides which tools to call
 		// Note: "Thinking..." and "Waiting..." messages are handled inside HandleToolCallLoop
-		finalResponse, queryResult, err := toolHandler.HandleToolCallLoop(ctx, llmClient, query, schemaContext, databaseType, conversationHistory, tools)
+		finalResponse, queryResult, completeMessages, err := toolHandler.HandleToolCallLoop(ctx, llmClient, query, schemaContext, databaseType, conversationHistory, tools, rawMessages)
 
 		if err != nil {
 			ui.ShowError(fmt.Sprintf("Failed to process request: %v", err))
@@ -695,28 +776,60 @@ func RunSQLModeWithSource(providedSourceName string, sessionFile string, overrid
 			continue
 		}
 
-		// Add user message to history
-		sess.AddMessage("user", query)
+		// Determine what to display
+		// If finalResponse is empty and queryResult exists, it means:
+		// 1. Results were already displayed (e.g., table output for execute_sql with output_mode="full")
+		// 2. LLM returned empty content as instructed (finish_reason="stop" with no content)
+		// In this case, don't display anything - results are already shown
+		var displayText string
+		if finalResponse != "" {
+			displayText = finalResponse
+		}
+		// Note: We don't display summary if finalResponse is empty and queryResult exists,
+		// because results are already displayed (e.g., table format for SQL queries)
 
-		// Add query result summary to conversation history
-		if queryResult != nil {
-			// Format result summary for conversation history
-			resultSummary := formatQueryResultSummary(queryResult)
-			// Append summary to final response so it's included in conversation history
-			if finalResponse != "" {
-				finalResponse = finalResponse + "\n\n" + resultSummary
-			} else {
-				finalResponse = resultSummary
+		// Display response to user (only if there's actual text to display)
+		if displayText != "" {
+			fmt.Println()
+			fmt.Println(displayText)
+			fmt.Println()
+		}
+
+		// Save complete messages array to session (includes tool calls and results)
+		// This preserves full conversation context for next request
+		// We save the entire messages array (including system message) so next request can use it
+		if completeMessages != nil && len(completeMessages) > 0 {
+			// Convert to json.RawMessage array for storage
+			rawMsgs := make([]json.RawMessage, 0, len(completeMessages))
+			for _, msg := range completeMessages {
+				if msgBytes, err := json.Marshal(msg); err == nil {
+					rawMsgs = append(rawMsgs, json.RawMessage(msgBytes))
+				}
+			}
+			if len(rawMsgs) > 0 {
+				// Replace entire RawMessages array (not append) to avoid duplicates
+				// The completeMessages array already includes all previous messages + new ones
+				sess.SetRawMessages(rawMsgs)
 			}
 		}
 
-		// Display final response
+		// Also save legacy format for backward compatibility (user and assistant text only)
+		sess.AddMessage("user", query)
+		var historyText string
 		if finalResponse != "" {
-			sess.AddMessage("assistant", finalResponse)
-			fmt.Println()
-			fmt.Println(finalResponse)
-			fmt.Println()
+			historyText = finalResponse
+			if queryResult != nil {
+				resultSummary := formatQueryResultSummary(queryResult)
+				if !strings.Contains(strings.ToLower(historyText), strings.ToLower(resultSummary)) {
+					historyText = finalResponse + "\n\n" + resultSummary
+				}
+			}
+		} else if queryResult != nil {
+			historyText = formatQueryResultSummary(queryResult)
+		} else {
+			historyText = "Operation completed."
 		}
+		sess.AddMessage("assistant", historyText)
 	}
 }
 

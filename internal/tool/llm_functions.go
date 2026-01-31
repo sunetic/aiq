@@ -20,13 +20,28 @@ func GetLLMFunctionsWithBuiltin(dbConn *db.Connection) []llm.Function {
 	if dbConn != nil {
 		tools = append(tools, llm.Function{
 			Name:        "execute_sql",
-			Description: "Execute a SQL query against the database and return the results. Available ONLY in database mode when a database source is selected. Use this when the user wants to query the database.",
+			Description: "**MANDATORY TOOL CALL**: Execute a SQL query against the database and return the results. Available ONLY in database mode when a database source is selected. **CRITICAL**: When the user requests database operations (SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, SHOW, etc.), you MUST call this tool. Do NOT describe what you will do in text - actually call the tool. Do NOT say 'I will execute' or 'Stand by while I execute' - just call the tool directly.",
 			Parameters: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"sql": map[string]interface{}{
 						"type":        "string",
 						"description": "The SQL query to execute",
+					},
+					"risk_level": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"low", "medium", "high"},
+						"description": "Optional: Risk level assessment for this operation. 'low' = safe to execute automatically (e.g., SELECT, SHOW), 'medium'/'high' = requires user confirmation (e.g., DROP, TRUNCATE). If not provided, system will assess risk conservatively.",
+					},
+					"task_type": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"definitive", "exploratory"},
+						"description": "Optional: Task type classification. 'definitive' = task is clear and complete, 'exploratory' = task requires information gathering or multi-step process. If not provided, system will infer from context.",
+					},
+					"output_mode": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{"full", "streaming"},
+						"description": "Optional: Output display mode. 'full' = display all results to user (for definitive tasks), 'streaming' = real-time streaming with truncation (for exploratory tasks). If not provided, inferred from task_type.",
 					},
 				},
 				"required": []string{"sql"},
