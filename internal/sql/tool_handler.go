@@ -1222,22 +1222,29 @@ You are a helpful AI assistant for database queries and related tasks.
 							lastQueryResult = queryResult
 
 							// Directly render table output (mysql client style)
+							fmt.Println()
 							if len(rowsData) > 0 {
-								fmt.Println()
 								tableOutput, tableErr := tool.RenderTableString(cols, rowsData)
 								if tableErr == nil {
 									fmt.Println(tableOutput)
 								}
-								fmt.Printf("%d row(s) in set\n", len(rowsData))
 							}
+							// Always show row count, even for empty results (MySQL-style)
+							fmt.Printf("%d row(s) in set\n", len(rowsData))
 
 							// Simplify result for LLM - results are already displayed to user
 							// Tell LLM to return minimal response (no content) since results are already shown
+							var instruction string
+							if len(rowsData) > 0 {
+								instruction = "CRITICAL: Results are already displayed to the user in table format. Do NOT repeat the results in your response. Return finish_reason='stop' with empty content (no text output). The user can see the results above."
+							} else {
+								instruction = "CRITICAL: Query executed successfully with 0 rows returned. The row count (0 row(s) in set) is already displayed to the user. Do NOT repeat this information. Return finish_reason='stop' with empty content (no text output)."
+							}
 							simplifiedResult := map[string]interface{}{
 								"status":      "success",
 								"row_count":   len(rowsData),
 								"displayed":   true,
-								"instruction": "CRITICAL: Results are already displayed to the user in table format. Do NOT repeat the results in your response. Return finish_reason='stop' with empty content (no text output). The user can see the results above.",
+								"instruction": instruction,
 							}
 							simplifiedJSON, _ := json.Marshal(simplifiedResult)
 							toolResult = json.RawMessage(simplifiedJSON)
