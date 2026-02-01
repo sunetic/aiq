@@ -19,7 +19,8 @@ AIQ (AI Query) is an intelligent SQL client that enables you to interact with da
 
 ### 🎬 Demo
 
-[![Basic Functionality Demo](https://img.shields.io/badge/▶️-Watch%20Demo-blue)](https://github.com/sunetic/aiq/raw/main/docs/basic.mp4)
+https://github.com/user-attachments/assets/7f15ddf7-1ae7-43e5-b3dd-a75b5e8c7aff
+
 
 ### ✨ Key Features
 
@@ -136,7 +137,9 @@ Auto-detects chart types: Categorical+Numerical → Bar/Pie | Temporal+Numerical
 
 Skills extend AIQ's capabilities by providing custom instructions and context. Automatically matched and loaded using **LLM-based semantic matching**.
 
-[![Skills Demo](https://img.shields.io/badge/▶️-Watch%20Skills%20Demo-blue)](https://github.com/sunetic/aiq/raw/main/docs/skill.mp4)
+
+https://github.com/user-attachments/assets/19c0abe4-d56a-4527-bb28-152eb136af0c
+
 
 ### Quick Start
 
