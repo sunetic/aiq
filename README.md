@@ -17,6 +17,10 @@
 
 AIQ (AI Query) is an intelligent SQL client that enables you to interact with databases using natural language. No need to write SQL manually—just ask questions in natural language, and AIQ will automatically generate SQL queries, execute them, and visualize the results as beautiful charts.
 
+### 🎬 Demo
+
+<video src="docs/basic.webm" controls width="100%"></video>
+
 ### ✨ Key Features
 
 - 🗣️ **Natural Language to SQL** - Ask questions in plain English or Chinese, get precise SQL queries
@@ -131,6 +135,8 @@ Auto-detects chart types: Categorical+Numerical → Bar/Pie | Temporal+Numerical
 ## 🎯 Skills - Extending AI Capabilities
 
 Skills extend AIQ's capabilities by providing custom instructions and context. Automatically matched and loaded using **LLM-based semantic matching**.
+
+<video src="docs/skill.webm" controls width="100%"></video>
 
 ### Quick Start
 

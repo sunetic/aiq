@@ -17,6 +17,10 @@
 
 AIQ (AI Query) 是一个智能 SQL 客户端，通过自然语言与数据库交互。无需编写 SQL，只需用自然语言提问，AIQ 会自动生成 SQL 查询并执行，还能将结果可视化为精美的图表。
 
+### 🎬 演示
+
+<video src="docs/basic.webm" controls width="100%"></video>
+
 ### ✨ 核心特性
 
 - 🗣️ **自然语言查询** - 用中文或英文提问，自动生成 SQL
@@ -85,6 +89,8 @@ AIQ - Main Menu
 ## 🎯 Skills - 扩展 AI 能力
 
 Skills 通过提供自定义指令和上下文扩展 AIQ 的能力。使用**基于 LLM 的语义匹配**自动匹配和加载。
+
+<video src="docs/skill.webm" controls width="100%"></video>
 
 ### 快速开始
 
