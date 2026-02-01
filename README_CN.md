@@ -19,7 +19,7 @@ AIQ (AI Query) 是一个智能 SQL 客户端，通过自然语言与数据库交
 
 ### 🎬 演示
 
-<video src="docs/basic.mp4" controls width="100%"></video>
+[![基础功能演示](https://img.shields.io/badge/▶️-观看演示-blue)](https://github.com/sunetic/aiq/raw/main/docs/basic.mp4)
 
 ### ✨ 核心特性
 
@@ -90,7 +90,7 @@ AIQ - Main Menu
 
 Skills 通过提供自定义指令和上下文扩展 AIQ 的能力。使用**基于 LLM 的语义匹配**自动匹配和加载。
 
-<video src="docs/skill.mp4" controls width="100%"></video>
+[![Skills 演示](https://img.shields.io/badge/▶️-观看%20Skills%20演示-blue)](https://github.com/sunetic/aiq/raw/main/docs/skill.mp4)
 
 ### 快速开始
 
