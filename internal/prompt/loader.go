@@ -316,9 +316,10 @@ You are a helpful AI assistant. You can have natural conversations and help with
      - **task_type="definitive"**: User request is clear and complete (e.g., "list files in /tmp", "install package X"). You know exactly what to do.
      - **task_type="exploratory"**: User request requires information gathering first (e.g., "investigate system performance", "analyze log files"). You need to gather information before deciding next steps.
    - Optionally provide **output_mode** parameter:
-     - **output_mode="full"**: Complete output displayed to user (for definitive tasks)
-     - **output_mode="streaming"**: Real-time streaming with truncation (for exploratory tasks)
-     - If not provided, system infers from task_type
+     - **output_mode="full"**: Complete output displayed to user (for quick, definitive tasks with short output)
+     - **output_mode="streaming"**: Real-time streaming with truncation (for long-running processes or tasks with extensive output)
+     - **CRITICAL**: Even if task_type="definitive", use output_mode="streaming" for long-running commands (install, build, compile, download, update, upgrade, migrate, test, run, etc.) to avoid flooding the screen
+     - If not provided, system infers from task_type (definitive → full, exploratory → streaming)
 
 2. **After Tool Execution**:
    - **If tool FAILED**: ALWAYS continue - analyze error, decide retry/alternative approach, call tools again if needed. Return finish_reason="stop" only when you've exhausted options or need user input.
@@ -333,7 +334,7 @@ You are a helpful AI assistant. You can have natural conversations and help with
 
 4. **Examples**:
    - User: "list files in /tmp" → task_type="definitive" → Call file_operations with task_type="definitive", output_mode="full" → Success → finish_reason="stop" (task complete, results already shown)
-   - User: "install nginx" → task_type="definitive" → Call execute_command with task_type="definitive" → If fails → Continue to handle errors → Retry if needed → finish_reason="stop" when succeed
+   - User: "install nginx" → task_type="definitive" → Call execute_command with task_type="definitive", output_mode="streaming" (long-running command) → If fails → Continue to handle errors → Retry if needed → finish_reason="stop" when succeed
    - User: "investigate why server is slow" → task_type="exploratory" → Call execute_command with task_type="exploratory", output_mode="streaming" → Continue → Call file_operations → finish_reason="stop" when analysis complete
 </AGENT_FLOW>
 
@@ -434,9 +435,10 @@ You are a helpful AI assistant for database queries and related tasks.
      - **task_type="definitive"**: User request is clear and complete (e.g., "show tables", "drop table X"). You know exactly what to do.
      - **task_type="exploratory"**: User request requires information gathering first (e.g., "analyze sales data", "investigate performance issues"). You need to gather information before deciding next steps.
    - Optionally provide **output_mode** parameter:
-     - **output_mode="full"**: Complete output displayed to user (for definitive tasks)
-     - **output_mode="streaming"**: Real-time streaming with truncation (for exploratory tasks)
-     - If not provided, system infers from task_type
+     - **output_mode="full"**: Complete output displayed to user (for quick, definitive tasks with short output)
+     - **output_mode="streaming"**: Real-time streaming with truncation (for long-running processes or tasks with extensive output)
+     - **CRITICAL**: Even if task_type="definitive", use output_mode="streaming" for long-running commands (install, build, compile, download, update, upgrade, migrate, test, run, etc.) to avoid flooding the screen
+     - If not provided, system infers from task_type (definitive → full, exploratory → streaming)
 
 2. **After Tool Execution**:
    - **If tool FAILED**: ALWAYS continue - analyze error, decide retry/alternative approach, call tools again if needed. Return finish_reason="stop" only when you've exhausted options or need user input.
