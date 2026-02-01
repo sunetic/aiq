@@ -19,7 +19,7 @@ AIQ (AI Query) is an intelligent SQL client that enables you to interact with da
 
 ### 🎬 Demo
 
-<video src="docs/basic.webm" controls width="100%"></video>
+<video src="docs/basic.mp4" controls width="100%"></video>
 
 ### ✨ Key Features
 
@@ -136,7 +136,7 @@ Auto-detects chart types: Categorical+Numerical → Bar/Pie | Temporal+Numerical
 
 Skills extend AIQ's capabilities by providing custom instructions and context. Automatically matched and loaded using **LLM-based semantic matching**.
 
-<video src="docs/skill.webm" controls width="100%"></video>
+<video src="docs/skill.mp4" controls width="100%"></video>
 
 ### Quick Start
 
