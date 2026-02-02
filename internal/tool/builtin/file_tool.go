@@ -295,7 +295,7 @@ func (t *FileTool) GetDefinition() map[string]interface{} {
 					"output_mode": map[string]interface{}{
 						"type":        "string",
 						"enum":        []string{"full", "streaming"},
-						"description": "Optional: Output display mode. 'full' = display all results to user (for definitive tasks), 'streaming' = real-time streaming with truncation (for exploratory tasks). If not provided, inferred from task_type.",
+						"description": "**REQUIRED**: Output display mode. Classify tool call as process-oriented or result-oriented: 'full' = result-oriented (tool output IS the final goal, e.g., 'list files'), 'streaming' = process-oriented (tool output is intermediate step, e.g., 'search and find file'). **MANDATORY**: Always explicitly set this parameter.",
 					},
 				},
 				"required": []string{"operation", "path"},

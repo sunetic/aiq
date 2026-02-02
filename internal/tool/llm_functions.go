@@ -41,7 +41,7 @@ func GetLLMFunctionsWithBuiltin(dbConn *db.Connection) []llm.Function {
 					"output_mode": map[string]interface{}{
 						"type":        "string",
 						"enum":        []string{"full", "streaming"},
-						"description": "Optional: Output display mode. 'full' = display all results to user (for definitive tasks), 'streaming' = real-time streaming with truncation (for exploratory tasks). If not provided, inferred from task_type.",
+						"description": "**REQUIRED**: Output display mode. Classify tool call as process-oriented or result-oriented: 'full' = result-oriented (tool output IS the final goal, e.g., 'show tables'), 'streaming' = process-oriented (tool output is intermediate step, e.g., 'analyze sales trends'). **MANDATORY**: Always explicitly set this parameter.",
 					},
 				},
 				"required": []string{"sql"},

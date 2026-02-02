@@ -414,7 +414,7 @@ func (t *CommandTool) GetDefinition() map[string]interface{} {
 					"output_mode": map[string]interface{}{
 						"type":        "string",
 						"enum":        []string{"full", "streaming"},
-						"description": "Optional: Output display mode. 'full' = display all results to user (for definitive tasks), 'streaming' = real-time streaming with truncation (for exploratory tasks). If not provided, inferred from task_type.",
+						"description": "**REQUIRED**: Output display mode. Classify tool call as process-oriented or result-oriented: 'full' = result-oriented (tool output IS the final goal, e.g., 'list files'), 'streaming' = process-oriented (tool output is intermediate step, e.g., 'install mysql', 'search and find'). **MANDATORY**: Always explicitly set this parameter. For long-running commands (install, build, compile, etc.), use 'streaming' even if task_type is 'definitive'.",
 					},
 				},
 				"required": []string{"command"},
