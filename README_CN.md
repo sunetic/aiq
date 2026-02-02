@@ -30,6 +30,8 @@ AIQ (AI Query) 是一个智能 SQL 客户端，通过自然语言与数据库交
 - 🔌 **多数据库支持** - [seekdb](https://www.oceanbase.ai/)、MySQL、PostgreSQL
 - 🎯 **Skills 系统** - 通过自定义领域知识扩展 AI 能力（基于 LLM 的语义匹配）
 - 🧠 **智能上下文管理** - 动态 Skills 加载/淘汰和基于 LLM 的压缩
+- ⚡ **智能输出模式** - 长时间运行进程使用流式输出，快速结果使用完整输出
+- 🛡️ **基于风险的确认** - 安全操作自动执行，危险操作需要确认
 - 🎨 **美观的 CLI 界面** - 流畅的交互体验和彩色输出
 - 💾 **会话持久化** - 保存和恢复对话会话
 
@@ -116,7 +118,11 @@ description: 针对指标和 SQL 模式的领域特定指导
 
 ### 内置工具
 
-Skills 指导 AI 使用: `execute_sql`、`http_request`、`execute_command`、`file_operations`
+Skills 指导 AI 使用：
+- `execute_sql` - 执行数据库 SQL 查询
+- `http_request` - 发起 HTTP 请求（GET、POST 等）
+- `execute_command` - 运行 shell 命令（支持智能输出模式）
+- `file_operations` - 读取、写入、列出文件和目录
 
 ### 推荐 Skills
 
@@ -124,7 +130,13 @@ Skills 指导 AI 使用: `execute_sql`、`http_request`、`execute_command`、`f
 
 ## ⚙️ 配置
 
-配置文件在 `~/.aiq/`: `config/config.yaml` (LLM)、`config/sources.yaml` (数据库)、`sessions/`、`skills/`、`bin/`
+配置文件在 `~/.aiq/`：
+- `config/config.yaml` - LLM 配置（API URL、API Key、模型）
+- `config/sources.yaml` - 数据库连接配置
+- `sessions/` - 保存的对话会话
+- `skills/` - 自定义 Skills 目录
+- `prompts/` - 自定义提示词模板（可选）
+- `bin/` - 二进制文件安装目录
 
 ## 🛠️ 开发
 

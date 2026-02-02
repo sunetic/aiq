@@ -31,6 +31,8 @@ https://github.com/user-attachments/assets/7f15ddf7-1ae7-43e5-b3dd-a75b5e8c7aff
 - 🔌 **Multiple Database Support** - [seekdb](https://www.oceanbase.ai/), MySQL, and PostgreSQL
 - 🎯 **Skills System** - Extend AI capabilities with custom domain knowledge (LLM-based semantic matching)
 - 🧠 **Intelligent Context Management** - Dynamic Skills loading/eviction and LLM-based compression
+- ⚡ **Smart Output Modes** - Intelligent streaming for long-running processes, full output for quick results
+- 🛡️ **Risk-Based Confirmation** - Automatic execution for safe operations, confirmation for risky ones
 - 🎨 **Beautiful CLI Interface** - Smooth interactions and color-coded output
 - 💾 **Session Persistence** - Save and restore conversation sessions
 
@@ -165,7 +167,11 @@ description: Domain-specific guidance for metrics and SQL patterns
 
 ### Built-in Tools
 
-Skills guide AI on using: `execute_sql`, `http_request`, `execute_command`, `file_operations`
+Skills guide AI on using:
+- `execute_sql` - Execute SQL queries against databases
+- `http_request` - Make HTTP requests (GET, POST, etc.)
+- `execute_command` - Run shell commands with smart output modes
+- `file_operations` - Read, write, list files and directories
 
 ### Recommended Skills
 
@@ -173,7 +179,13 @@ Skills guide AI on using: `execute_sql`, `http_request`, `execute_command`, `fil
 
 ## ⚙️ Configuration
 
-Config files in `~/.aiq/`: `config/config.yaml` (LLM), `config/sources.yaml` (databases), `sessions/`, `skills/`, `bin/`
+Config files in `~/.aiq/`:
+- `config/config.yaml` - LLM configuration (API URL, API Key, model)
+- `config/sources.yaml` - Database connection configurations
+- `sessions/` - Saved conversation sessions
+- `skills/` - Custom Skills directory
+- `prompts/` - Custom prompt templates (optional)
+- `bin/` - Binary installation directory
 
 ## 🛠️ Development
 
